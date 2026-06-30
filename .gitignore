@@ -1,0 +1,28 @@
+﻿# Environment
+.env
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Vector store data
+backend/faiss_index/
+backend/chroma_db/
+
+# Uploaded files
+backend/uploads/
+
+# Logs
+*.log
+*_err.txt
+*_out.txt
+*_output.txt
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
