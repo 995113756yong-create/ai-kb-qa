@@ -1,3 +1,13 @@
+---
+title: AI KB QA System
+emoji: 📚
+colorFrom: blue
+colorTo: indigo
+sdk: docker
+app_port: 7860
+pinned: false
+---
+
 # AI 知识库问答系统 (RAG)
 
 基于 RAG（Retrieval-Augmented Generation）架构的智能知识库问答系统。用户上传文档后，系统自动切分、向量化存储，并基于文档内容回答用户提问。
