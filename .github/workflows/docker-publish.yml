@@ -36,6 +36,12 @@ jobs:
     needs: build-and-push
     runs-on: ubuntu-latest
     steps:
+      - name: Install kubectl
+        run: |
+          curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+          chmod +x kubectl
+          sudo mv kubectl /usr/local/bin/
+
       - name: Configure kubectl with Sealos kubeconfig
         run: |
           mkdir -p $HOME/.kube
@@ -46,4 +52,4 @@ jobs:
         run: |
           kubectl get deployments -n ns-p93832nn
           kubectl rollout restart deployment -n ns-p93832nn --all
-          kubectl rollout status deployment -n ns-p93832nn --all --timeout=120s
+          kubectl rollout status deployment -n ns-p93832nn --all --timeout=180s
