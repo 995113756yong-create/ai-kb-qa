@@ -51,7 +51,7 @@
     </div>
 
     <script>
-        const API_BASE = "http://127.0.0.1:8000";
+        const API_BASE = "";  // same origin in production, empty for relative path
         const chatArea = document.getElementById("chatArea");
         const questionInput = document.getElementById("questionInput");
         const sendBtn = document.getElementById("sendBtn");
@@ -78,7 +78,7 @@
             const formData = new FormData();
             formData.append("file", file);
             try {
-                const resp = await fetch(API_BASE + "/upload", { method: "POST", body: formData });
+                const resp = await fetch(API_BASE + "/api/upload", { method: "POST", body: formData });
                 const data = await resp.json();
                 if (data.status === "ok") {
                     addMsg("文档已上传: " + data.filename + " (" + data.chunks + " chunks)", "system");
@@ -106,7 +106,7 @@
             sendBtn.textContent = "思考中...";
             addMsg("正在检索文档...", "system");
             try {
-                const resp = await fetch(API_BASE + "/ask", {
+                const resp = await fetch(API_BASE + "/api/ask", {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({ question: q })
