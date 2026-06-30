@@ -49,17 +49,8 @@ jobs:
           mkdir -p $HOME/.kube
           printf '%s' "$KUBECONFIG_CONTENT" > $HOME/.kube/config
           chmod 600 $HOME/.kube/config
-          echo "=== Debug: kubeconfig line count ==="
-          wc -l $HOME/.kube/config
-          echo "=== Debug: first 5 lines ==="
-          head -5 $HOME/.kube/config
-          echo "=== Debug: contexts section ==="
-          grep -A2 "contexts:" $HOME/.kube/config || echo "NO contexts FOUND"
-          echo "=== Debug: current-context ==="
-          grep "current-context:" $HOME/.kube/config || echo "NO current-context FOUND"
 
       - name: Restart deployment on Sealos
         run: |
-          kubectl get deployments -n ns-p93832nn
-          kubectl rollout restart deployment -n ns-p93832nn --all
-          kubectl rollout status deployment -n ns-p93832nn --all --timeout=180s
+          kubectl rollout restart deployment ai-kb-qa -n ns-p93832nn
+          kubectl rollout status deployment ai-kb-qa -n ns-p93832nn --timeout=180s
