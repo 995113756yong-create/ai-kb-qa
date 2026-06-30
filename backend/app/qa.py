@@ -4,7 +4,7 @@ from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.runnables import RunnablePassthrough
 from app.config import OPENAI_API_KEY, OPENAI_API_BASE, CHAT_MODEL
-from app.document import load_faiss
+from app.document import load_faiss, FAISS_DIR
 
 
 def get_vectorstore():
@@ -45,6 +45,8 @@ Answer:"""
 
 def ask(question: str) -> str:
     """Ask a question and get answer"""
+    if not os.path.exists(os.path.join(FAISS_DIR, "index.faiss")):
+        return "The knowledge base is empty. Please upload a document first."
     chain = build_rag_chain()
     answer = chain.invoke(question)
     return answer
