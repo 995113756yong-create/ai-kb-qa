@@ -13,8 +13,8 @@ COPY frontend/ frontend/
 # Create uploads directory
 RUN mkdir -p backend/uploads
 
-# Hugging Face Spaces uses port 7860
-ENV PORT=7860
-EXPOSE 7860
+# Cloud platforms: use PORT env var or default to 8000
+ENV PORT=8000
+EXPOSE 8000
 
-CMD uvicorn app.main:app --host 0.0.0.0 --port 7860
+CMD uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}
