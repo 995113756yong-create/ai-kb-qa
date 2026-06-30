@@ -1,4 +1,4 @@
-name: Build and Push Docker Image
+name: Build, Push and Deploy
 
 on:
   push:
@@ -31,3 +31,19 @@ jobs:
           context: .
           push: true
           tags: ghcr.io/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}:latest
+
+  deploy:
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    steps:
+      - name: Configure kubectl with Sealos kubeconfig
+        run: |
+          mkdir -p $HOME/.kube
+          echo "${{ secrets.SEALOS_KUBECONFIG }}" > $HOME/.kube/config
+          chmod 600 $HOME/.kube/config
+
+      - name: Restart deployment on Sealos
+        run: |
+          kubectl get deployments -n ns-p93832nn
+          kubectl rollout restart deployment -n ns-p93832nn --all
+          kubectl rollout status deployment -n ns-p93832nn --all --timeout=120s
