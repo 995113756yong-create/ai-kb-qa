@@ -17,4 +17,5 @@ RUN mkdir -p backend/uploads
 ENV PORT=8000
 EXPOSE 8000
 
+WORKDIR /app/backend
 CMD uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}
