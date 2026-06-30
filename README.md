@@ -1,16 +1,8 @@
----
-title: AI KB QA System
-emoji: 📚
-colorFrom: blue
-colorTo: indigo
-sdk: docker
-app_port: 7860
-pinned: false
----
-
 # AI 知识库问答系统 (RAG)
 
 基于 RAG（Retrieval-Augmented Generation）架构的智能知识库问答系统。用户上传文档后，系统自动切分、向量化存储，并基于文档内容回答用户提问。
+
+**在线演示**：https://suinlwijcdst.cloud.sealos.io
 
 ## 技术栈
 
@@ -22,7 +14,8 @@ pinned: false
 | Embedding 模型 | BAAI/bge-large-zh-v1.5（硅基流动 API） |
 | 对话模型 | Qwen/Qwen2.5-7B-Instruct（硅基流动 API） |
 | 前端 | 原生 HTML/CSS/JS（单文件，零依赖） |
-| 容器化 | Docker + docker-compose |
+| 容器化 | Docker + GitHub Actions CI/CD |
+| 云部署 | Sealos Cloud |
 
 ## 核心功能
 
@@ -30,6 +23,7 @@ pinned: false
 - **智能问答**：基于 FAISS 语义检索 Top-3 相关片段，结合 LLM 生成精准回答
 - **实时 Web 界面**：上传文档 → 提问 → 获取回答，全流程可视化
 - **单服务部署**：FastAPI 同时托管前端和 API，一个端口搞定
+- **CI/CD 自动化**：GitHub Actions 自动构建镜像并推送至 GHCR，push 即部署
 
 ## 项目结构
 
@@ -47,6 +41,9 @@ ai-kb-qa/
 │   └── requirements.txt
 ├── frontend/
 │   └── index.html          # 单文件聊天界面
+├── .github/
+│   └── workflows/
+│       └── docker-publish.yml  # GitHub Actions CI/CD
 ├── Dockerfile
 ├── docker-compose.yml
 ├── .dockerignore
@@ -94,6 +91,14 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000
 
 打开浏览器访问 `http://localhost:8000` 即可使用（前端+API 同一服务）。
 
+### 方式三：云部署（Sealos）
+
+镜像已发布至 GitHub Container Registry，可直接在 Sealos App Launchpad 部署：
+
+- 镜像地址：`ghcr.io/995113756yong-create/ai-kb-qa:latest`
+- 容器端口：`8000`
+- 环境变量：`SILICONFLOW_API_KEY` = 你的 API Key
+
 ## API 文档
 
 | 方法 | 路径 | 说明 |
@@ -119,6 +124,21 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000
     │
     ▼
 用户提问 ──→ FAISS 语义检索 Top-3 ──→ 构建 Prompt ──→ LLM 生成回答
+```
+
+## CI/CD 流程
+
+```
+git push main
+    │
+    ▼
+GitHub Actions 自动触发
+    │
+    ▼
+Docker 构建镜像 → 推送至 GHCR (ghcr.io)
+    │
+    ▼
+Sealos 拉取最新镜像 → 自动部署
 ```
 
 ## License
