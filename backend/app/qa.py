@@ -16,15 +16,19 @@ def build_rag_chain():
     vectorstore = get_vectorstore()
     retriever = vectorstore.as_retriever(search_kwargs={"k": 3})
 
-    template = """You are a helpful assistant. Answer the question based on the context below.
-If the answer is not in the context, say I cannot find the answer in the document.
+    template = """你是一个知识库问答助手。请根据以下检索到的文档内容，用中文准确回答用户的问题。
 
-Context:
+要求：
+1. 只根据文档内容回答，不要编造信息
+2. 回答要简洁、结构化，合理使用列表和表格
+3. 如果文档中没有相关内容，请回复“文档中未找到相关信息”
+
+文档内容：
 {context}
 
-Question: {question}
+用户问题：{question}
 
-Answer:"""
+回答：""""
 
     prompt = ChatPromptTemplate.from_template(template)
 
@@ -46,7 +50,7 @@ Answer:"""
 def ask(question: str) -> str:
     """Ask a question and get answer"""
     if not os.path.exists(os.path.join(FAISS_DIR, "index.faiss")):
-        return "The knowledge base is empty. Please upload a document first."
+        return "知识库为空，请先上传文档。"
     chain = build_rag_chain()
     answer = chain.invoke(question)
     return answer
