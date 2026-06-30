@@ -43,9 +43,11 @@ jobs:
           sudo mv kubectl /usr/local/bin/
 
       - name: Configure kubectl with Sealos kubeconfig
+        env:
+          KUBECONFIG_CONTENT: ${{ secrets.SEALOS_KUBECONFIG }}
         run: |
           mkdir -p $HOME/.kube
-          echo "${{ secrets.SEALOS_KUBECONFIG }}" > $HOME/.kube/config
+          printf '%s' "$KUBECONFIG_CONTENT" > $HOME/.kube/config
           chmod 600 $HOME/.kube/config
 
       - name: Restart deployment on Sealos
