@@ -21,6 +21,13 @@
         .msg-user { align-self: flex-end; background: #2563eb; color: #fff; }
         .msg-bot { align-self: flex-start; background: #fff; color: #333; border: 1px solid #e0e0e0; }
         .msg-system { align-self: center; background: #f0fdf4; color: #166534; border: 1px solid #bbf7d0; font-size: 13px; }
+        .msg-bot .answer { white-space: pre-wrap; }
+
+        /* Sources */
+        .sources { margin-top: 10px; border-top: 1px dashed #e0e0e0; padding-top: 8px; }
+        .sources summary { cursor: pointer; color: #2563eb; font-size: 13px; }
+        .source-card { margin-top: 8px; padding: 8px 10px; background: #f9fafb; border-radius: 6px; font-size: 12px; color: #555; }
+        .source-card .title { font-weight: 600; color: #333; margin-bottom: 4px; }
 
         /* Input area */
         .input-area { background: #fff; padding: 16px 24px; border-top: 1px solid #e0e0e0; display: flex; gap: 12px; }
@@ -59,6 +66,64 @@
         const fileInput = document.getElementById("fileInput");
         let docReady = false;
 
+        function enableAsk() {
+            docReady = true;
+            questionInput.disabled = false;
+            sendBtn.disabled = false;
+        }
+
+        // 页面加载时查询服务端已有文档，刷新后也能直接提问
+        async function loadDocs() {
+            try {
+                const resp = await fetch(API_BASE + "/api/docs");
+                if (!resp.ok) return;
+                const data = await resp.json();
+                if (data.docs && data.docs.length > 0) {
+                    const names = data.docs.map(d => d.filename).join("、");
+                    addMsg("知识库已有 " + data.docs.length + " 份文档：" + names, "system");
+                    enableAsk();
+                }
+            } catch (e) { /* 忽略，保持上传后再提问 */ }
+        }
+
+        // 回答 + 出处卡片（全部用 textContent，避免 XSS）
+        function addAnswer(answer, sources) {
+            const div = document.createElement("div");
+            div.className = "msg msg-bot";
+            const p = document.createElement("div");
+            p.className = "answer";
+            p.textContent = answer;
+            div.appendChild(p);
+            if (sources && sources.length > 0) {
+                const details = document.createElement("details");
+                details.className = "sources";
+                const summary = document.createElement("summary");
+                summary.textContent = "出处（" + sources.length + "）";
+                details.appendChild(summary);
+                sources.forEach(src => {
+                    const card = document.createElement("div");
+                    card.className = "source-card";
+                    const title = document.createElement("div");
+                    title.className = "title";
+                    title.textContent = "[" + src.index + "] " + src.source + (src.page ? " · 第" + src.page + "页" : "");
+                    const body = document.createElement("div");
+                    body.textContent = src.snippet + (src.snippet.length >= 200 ? "…" : "");
+                    card.appendChild(title);
+                    card.appendChild(body);
+                    details.appendChild(card);
+                });
+                div.appendChild(details);
+            }
+            chatArea.appendChild(div);
+            chatArea.scrollTop = chatArea.scrollHeight;
+        }
+
+        // FastAPI 的错误信息在 detail 里，422 时是数组
+        function errorText(data) {
+            if (!data || !data.detail) return "unknown error";
+            return Array.isArray(data.detail) ? data.detail.map(d => d.msg).join("; ") : data.detail;
+        }
+
         // Add message to chat
         function addMsg(text, type) {
             const div = document.createElement("div");
@@ -80,13 +145,11 @@
             try {
                 const resp = await fetch(API_BASE + "/api/upload", { method: "POST", body: formData });
                 const data = await resp.json();
-                if (data.status === "ok") {
+                if (resp.ok && data.status === "ok") {
                     addMsg("文档已上传: " + data.filename + " (" + data.chunks + " chunks)", "system");
-                    docReady = true;
-                    questionInput.disabled = false;
-                    sendBtn.disabled = false;
+                    enableAsk();
                 } else {
-                    addMsg("上传失败: " + (data.detail || "unknown error"), "system");
+                    addMsg("上传失败: " + errorText(data), "system");
                 }
             } catch (e) {
                 addMsg("上传失败: " + e.message, "system");
@@ -113,10 +176,10 @@
                 });
                 const data = await resp.json();
                 chatArea.lastChild.remove();
-                if (data.status === "ok") {
-                    addMsg(data.answer, "bot");
+                if (resp.ok && data.status === "ok") {
+                    addAnswer(data.answer, data.sources);
                 } else {
-                    addMsg("出错了: " + (data.detail || "unknown"), "system");
+                    addMsg("出错了: " + errorText(data), "system");
                 }
             } catch (e) {
                 chatArea.lastChild.remove();
@@ -128,7 +191,8 @@
         }
 
         sendBtn.onclick = sendQuestion;
-        questionInput.onkeydown = (e) => { if (e.key === "Enter") sendQuestion(); };
+        questionInput.onkeydown = (e) => { if (e.key === "Enter" && !e.isComposing) sendQuestion(); };
+        loadDocs();
     </script>
 </body>
 </html>

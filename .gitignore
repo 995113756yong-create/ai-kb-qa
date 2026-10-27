@@ -1,10 +1,11 @@
-﻿# Environment
+# Environment
 .env
 
 # Python
 __pycache__/
 *.pyc
 *.pyo
+.pytest_cache/
 
 # Vector store data
 backend/faiss_index/
