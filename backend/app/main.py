@@ -8,11 +8,15 @@ from typing import Optional
 from fastapi import FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from langchain_core.embeddings import Embeddings
 from langchain_core.language_models import BaseChatModel
 from pydantic import BaseModel, Field
 
 from app import config
+from app.agent.llm import AgentLLM, OpenAICompatibleLLM
+from app.agent.runner import run_agent
+from app.agent.sse import SSE_HEADERS, stream_events
 from app.document import KnowledgeBase, get_embeddings, load_and_split
 from app.qa import QAService, get_llm
 
@@ -24,6 +28,10 @@ logger = logging.getLogger(__name__)
 
 
 class AskRequest(BaseModel):
+    question: str = Field(..., min_length=1, max_length=1000)
+
+
+class AgentRequest(BaseModel):
     question: str = Field(..., min_length=1, max_length=1000)
 
 
@@ -39,20 +47,25 @@ def create_app(
     upload_dir: str = config.UPLOAD_DIR,
     index_dir: str = config.FAISS_DIR,
     max_upload_mb: int = config.MAX_UPLOAD_MB,
+    agent_llm: Optional[AgentLLM] = None,
+    agent_max_steps: int = config.AGENT_MAX_STEPS,
+    agent_log_dir: Optional[str] = config.AGENT_LOG_DIR,
 ) -> FastAPI:
     """应用工厂：生产环境用默认参数；测试时注入假的 embeddings / llm 和临时目录。"""
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         os.makedirs(upload_dir, exist_ok=True)
-        app.state.kb = app.state.qa = None
+        app.state.kb = app.state.qa = app.state.agent_llm = None
         if embeddings is None and not config.OPENAI_API_KEY:
-            # 不阻止启动：健康检查和前端照常可用，上传/问答返回 503
+            # 不阻止启动：健康检查照常可用，上传/问答返回 503
             logger.warning(MISSING_KEY_MSG)
         else:
             kb = KnowledgeBase(index_dir, embeddings or get_embeddings())
             app.state.kb = kb
             app.state.qa = QAService(kb, llm or get_llm())
+            # Agent 用独立模型（需要稳定的 tools 调用能力），与固定 RAG 分开配置
+            app.state.agent_llm = agent_llm or OpenAICompatibleLLM()
         yield
 
     app = FastAPI(title="AI KB QA System", lifespan=lifespan)
@@ -151,6 +164,28 @@ def create_app(
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"问答失败：{e}")
         return {"status": "ok", "question": question, **result}
+
+    @app.post("/api/agent/stream")
+    async def agent_stream(req: AgentRequest, request: Request):
+        kb = _require(request, "kb")
+        llm_impl = _require(request, "agent_llm")
+        question = req.question.strip()
+        if not question:
+            raise HTTPException(status_code=422, detail="问题不能为空")
+
+        # run_agent 是同步生成器，交给 sse 层在后台线程里逐条取，避免阻塞事件循环
+        events = run_agent(
+            question,
+            kb,
+            llm_impl,
+            max_steps=agent_max_steps,
+            log_dir=agent_log_dir,
+        )
+        return StreamingResponse(
+            stream_events(events, request.is_disconnected),
+            media_type="text/event-stream",
+            headers=SSE_HEADERS,
+        )
 
     # 前端由 Next.js 独立部署，后端只提供 API，不再托管任何静态资源。
     return app
