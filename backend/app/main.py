@@ -1,5 +1,6 @@
 import logging
 import os
+import re
 import uuid
 from contextlib import asynccontextmanager
 from typing import Optional
@@ -7,7 +8,6 @@ from typing import Optional
 from fastapi import FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
 from langchain_core.embeddings import Embeddings
 from langchain_core.language_models import BaseChatModel
 from pydantic import BaseModel, Field
@@ -17,6 +17,7 @@ from app.document import KnowledgeBase, get_embeddings, load_and_split
 from app.qa import QAService, get_llm
 
 READ_BLOCK = 1024 * 1024
+DOC_ID_RE = re.compile(r"^[0-9a-f]{32}$")
 MISSING_KEY_MSG = "服务未配置 OPENAI_API_KEY，暂时无法上传和问答"
 
 logger = logging.getLogger(__name__)
@@ -125,6 +126,20 @@ def create_app(
             "message": "file uploaded and indexed: " + display_name,
         }
 
+    @app.delete("/api/docs/{doc_id}")
+    def delete_doc(doc_id: str, request: Request):
+        kb = _require(request, "kb")
+        if not DOC_ID_RE.fullmatch(doc_id):
+            raise HTTPException(status_code=400, detail="doc_id 格式不合法")
+        removed = kb.delete_document(doc_id)
+        if removed is None:
+            raise HTTPException(status_code=404, detail="文档不存在")
+
+        # 上传目录里的文件按 doc_id + 扩展名存放，不依赖清单里的文件名
+        ext = removed.get("ext") or ""
+        _remove_quietly(os.path.join(upload_dir, doc_id + ext))
+        return {"status": "ok", "doc_id": doc_id, "filename": removed["filename"]}
+
     @app.post("/api/ask")
     def ask_question(req: AskRequest, request: Request):
         qa = _require(request, "qa")
@@ -137,9 +152,7 @@ def create_app(
             raise HTTPException(status_code=500, detail=f"问答失败：{e}")
         return {"status": "ok", "question": question, **result}
 
-    # 前端托管：StaticFiles 会校验路径必须位于目录内，替代原来的手写兜底路由。
-    # 必须最后挂载，否则会吞掉 /api 路由。
-    app.mount("/", StaticFiles(directory=config.FRONTEND_DIR, html=True), name="frontend")
+    # 前端由 Next.js 独立部署，后端只提供 API，不再托管任何静态资源。
     return app
 
 

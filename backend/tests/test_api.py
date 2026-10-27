@@ -16,14 +16,13 @@ def test_health(client):
     assert client.get("/api/health").json()["status"] == "ok"
 
 
-def test_frontend_served(client):
-    r = client.get("/")
-    assert r.status_code == 200
-    assert "AI 知识库问答" in r.text
+def test_root_is_404(client):
+    """后端只提供 API，前端由 Next.js 提供，根路径不应命中任何路由。"""
+    assert client.get("/").status_code == 404
 
 
 def test_frontend_path_traversal_blocked(client):
-    """回归测试：原兜底路由可用 /..%2F..%2F.env 读到任意文件。"""
+    """回归测试：原兜底路由可用 /..%2F..%2F.env 读到任意文件；移除前端托管后统一 404。"""
     for url in [
         "/..%2F..%2Fbackend%2Fapp%2Fconfig.py",
         "/%2E%2E/%2E%2E/backend/app/config.py",
@@ -111,3 +110,36 @@ def test_missing_api_key_still_starts(monkeypatch, dirs):
         assert c.get("/api/docs").json()["docs"] == []
         assert c.post("/api/ask", json={"question": "hi"}).status_code == 503
         assert _upload(c, "a.txt", b"hello").status_code == 503
+
+
+def _upload_id(client, name, content):
+    r = _upload(client, name, content)
+    assert r.status_code == 200, r.text
+    return r.json()["doc_id"]
+
+
+def test_delete_document_api(client, dirs):
+    upload_dir, _ = dirs
+    doc_id = _upload_id(client, "a.txt", "苹果是一种水果".encode("utf-8"))
+    keep_id = _upload_id(client, "b.txt", "火星是一颗行星".encode("utf-8"))
+    assert os.path.exists(os.path.join(upload_dir, doc_id + ".txt"))
+
+    r = client.delete(f"/api/docs/{doc_id}")
+    assert r.status_code == 200, r.text
+    assert r.json() == {"status": "ok", "doc_id": doc_id, "filename": "a.txt"}
+    assert not os.path.exists(os.path.join(upload_dir, doc_id + ".txt"))
+
+    docs = client.get("/api/docs").json()["docs"]
+    assert [d["doc_id"] for d in docs] == [keep_id]
+    assert all("苹果" not in s["snippet"] for s in client.post(
+        "/api/ask", json={"question": "苹果是一种水果"}
+    ).json()["sources"])
+
+
+def test_delete_document_rejects_bad_id(client):
+    assert client.delete("/api/docs/not-a-hex-id").status_code == 400
+    assert client.delete("/api/docs/" + "a" * 31).status_code == 400
+
+
+def test_delete_document_missing_id(client):
+    assert client.delete("/api/docs/" + "a" * 32).status_code == 404

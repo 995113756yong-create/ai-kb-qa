@@ -16,7 +16,6 @@ CHAT_MODEL = os.getenv("CHAT_MODEL", "Qwen/Qwen2.5-7B-Instruct")
 # 存储目录
 UPLOAD_DIR = os.getenv("UPLOAD_DIR", os.path.join(BACKEND_DIR, "uploads"))
 FAISS_DIR = os.getenv("FAISS_DIR", os.path.join(BACKEND_DIR, "faiss_index"))
-FRONTEND_DIR = os.path.abspath(os.path.join(BACKEND_DIR, "..", "frontend"))
 
 # 上传限制
 ALLOWED_EXTENSIONS = {".txt", ".md", ".pdf"}

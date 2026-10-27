@@ -2,8 +2,9 @@
 import pathlib
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
+SKIP_DIRS = {".git", "node_modules", ".next", ".venv"}
 CHECK = [p for ext in ("*.py", "*.html", "*.md", "*.yml", "*.txt") for p in ROOT.rglob(ext)
-         if ".git" not in p.parts and "node_modules" not in p.parts]
+         if not SKIP_DIRS & set(p.parts)]
 
 
 def test_source_files_are_clean_utf8():
