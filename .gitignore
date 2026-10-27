@@ -9,10 +9,18 @@ __pycache__/
 
 # Vector store data
 backend/faiss_index/
+backend/faiss_index.legacy-*/
 backend/chroma_db/
 
 # Uploaded files
 backend/uploads/
+
+# Agent 运行日志
+backend/logs/
+
+# Frontend
+frontend/node_modules/
+frontend/.next/
 
 # Logs
 *.log
