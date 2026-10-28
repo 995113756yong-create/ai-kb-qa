@@ -393,3 +393,15 @@ def test_duplicate_ids_are_collapsed():
 
     assert clean == "结论 [1]。"
     assert len(sources) == 1 and grounded is True
+
+
+def test_agent_stream_missing_key_returns_503(tmp_path, monkeypatch):
+    """CI 里没有 .env，未配 Key 时应用要能启动，Agent 接口返回 503 而不是启动就崩。"""
+    from app import config
+
+    monkeypatch.setattr(config, "OPENAI_API_KEY", None)
+    app = create_app(upload_dir=str(tmp_path / "u"), index_dir=str(tmp_path / "i"))
+
+    with TestClient(app) as client:
+        assert client.get("/api/health").status_code == 200
+        assert client.post("/api/agent/stream", json={"question": "hi"}).status_code == 503

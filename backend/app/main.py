@@ -64,8 +64,13 @@ def create_app(
             kb = KnowledgeBase(index_dir, embeddings or get_embeddings())
             app.state.kb = kb
             app.state.qa = QAService(kb, llm or get_llm())
-            # Agent 用独立模型（需要稳定的 tools 调用能力），与固定 RAG 分开配置
-            app.state.agent_llm = agent_llm or OpenAICompatibleLLM()
+            # Agent 用独立模型（需要稳定的 tools 调用能力），与固定 RAG 分开配置。
+            # 没配 Key 时保持 None，/api/agent/stream 会返回 503；
+            # 不能在这里无条件构造客户端，否则未配置 Key 的环境连启动都会失败。
+            if agent_llm is not None:
+                app.state.agent_llm = agent_llm
+            elif config.OPENAI_API_KEY:
+                app.state.agent_llm = OpenAICompatibleLLM()
         yield
 
     app = FastAPI(title="AI KB QA System", lifespan=lifespan)

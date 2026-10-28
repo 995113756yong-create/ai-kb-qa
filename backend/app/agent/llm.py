@@ -2,7 +2,7 @@
 from dataclasses import dataclass, field
 from typing import Iterator, List, Optional, Protocol
 
-from app.config import AGENT_MODEL, OPENAI_API_BASE, OPENAI_API_KEY
+from app import config
 
 
 @dataclass
@@ -35,16 +35,21 @@ class OpenAICompatibleLLM:
 
     def __init__(
         self,
-        model: str = AGENT_MODEL,
-        api_key: Optional[str] = OPENAI_API_KEY,
-        base_url: str = OPENAI_API_BASE,
+        model: Optional[str] = None,
+        api_key: Optional[str] = None,
+        base_url: Optional[str] = None,
         temperature: float = 0.1,
     ):
         from openai import OpenAI
 
-        self.model = model
+        # 运行期读配置，而不是把模块级常量当默认参数绑死；
+        # 否则测试里 monkeypatch config 之后仍然会拿到导入时的旧值
+        self.model = model or config.AGENT_MODEL
         self.temperature = temperature
-        self._client = OpenAI(api_key=api_key, base_url=base_url)
+        self._client = OpenAI(
+            api_key=api_key or config.OPENAI_API_KEY,
+            base_url=base_url or config.OPENAI_API_BASE,
+        )
 
     def chat(self, messages: List[dict], tools: Optional[List[dict]] = None) -> AssistantTurn:
         kwargs = {
