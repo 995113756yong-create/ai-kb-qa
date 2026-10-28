@@ -149,13 +149,34 @@ jobs:
       - name: Verify cluster connectivity
         run: |
           set -eu
+
+          # 失败时把 kubeconfig 的结构信息打出来，方便判断是「内容坏了」还是「证书过期」。
+          # 只输出结构和长度，不输出 token 与证书原文。
+          dump_shape() {
+            echo "--- kubeconfig 结构自检 ---"
+            echo "文件行数: $(wc -l < "$HOME/.kube/config")"
+            for k in "server:" "certificate-authority-data:" "token:" "current-context:"; do
+              if grep -q "$k" "$HOME/.kube/config"; then
+                echo "  $k 存在"
+              else
+                echo "  $k 缺失"
+              fi
+            done
+            ca_len=$(grep "certificate-authority-data:" "$HOME/.kube/config" \
+              | sed 's/.*data: //' | tr -d ' ' | awk '{print length($0)}' || echo 0)
+            echo "  CA 数据长度: ${ca_len}（正常 1500~3000）"
+            echo "--- 集群返回 ---"
+            kubectl cluster-info 2>&1 | head -n 10 || true
+          }
+
           if ! kubectl cluster-info >/dev/null 2>&1; then
-            echo "::error::无法连接 Sealos 集群，请检查 SEALOS_KUBECONFIG（证书或 token 可能已失效）"
-            kubectl cluster-info || true
+            dump_shape
+            echo "::error::无法连接 Sealos 集群。证书过期请到 Sealos 重新下载 kubeconfig；"
+            echo "::error::若 CA 长度异常说明 Secret 内容被截断，可改用 base64 形式粘贴。"
             exit 1
           fi
+
           echo "集群连通性正常"
-          kubectl version --output=yaml 2>/dev/null | head -n 5 || true
 
       # Sealos 的 App Launchpad 会给 deployment 加随机后缀（如 ai-kb-qa-zmtnddmomzjs），
       # 所以不能写死名字：先按前缀找，找到唯一的就直接用，找不到就跳过而不是失败。
