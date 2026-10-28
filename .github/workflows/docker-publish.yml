@@ -265,6 +265,37 @@ jobs:
             echo "::error::[$label] 当前 prefix=$prefix"
           }
 
+          # Sealos App Launchpad 对挂了持久卷的应用用 StatefulSet（Pod 名形如 app-0），
+          # 对无状态应用用 Deployment（Pod 名形如 app-hash-xxxx）。
+          # 所以两种都要找，不能只查 deployment。
+          KIND_NAMESPACE_TMP=""
+
+          dump_targets() {
+            cfg="$1"; ns="$2"; label="$3"
+            echo "[$label] $ns 下的 workload："
+            KUBECONFIG="$cfg" kubectl get deployment -n "$ns" --no-headers 2>&1 | sed 's/^/    deploy: /' || true
+            KUBECONFIG="$cfg" kubectl get statefulset -n "$ns" --no-headers 2>&1 | sed 's/^/    sts:    /' || true
+          }
+
+          # 输出形如 "deployment/xxx" 或 "statefulset/xxx"，找不到返回空
+          find_workload() {
+            cfg="$1"; ns="$2"; wanted="$3"
+
+            if KUBECONFIG="$cfg" kubectl get deployment -n "$ns" -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' 2>/dev/null \
+              | grep -Fxq -- "$wanted"; then
+              printf 'deployment/%s' "$wanted"
+              return 0
+            fi
+
+            if KUBECONFIG="$cfg" kubectl get statefulset -n "$ns" -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' 2>/dev/null \
+              | grep -Fxq -- "$wanted"; then
+              printf 'statefulset/%s' "$wanted"
+              return 0
+            fi
+
+            printf ''
+          }
+
           restart_one() {
             cfg="$1"; ns="$2"; prefix="$3"; exact="$4"; label="$5"
 
@@ -273,35 +304,26 @@ jobs:
               return 0
             fi
 
-            if ! list=$(KUBECONFIG="$cfg" kubectl get deployment -n "$ns" -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' 2>&1); then
-              echo "::error::[$label] 查询 namespace $ns 失败：$list"
+            dump_targets "$cfg" "$ns" "$label"
+
+            if [ -n "$exact" ]; then
+              target="$exact"
+            else
+              target="$prefix"
+            fi
+
+            workload=$(find_workload "$cfg" "$ns" "$target")
+
+            if [ -z "$workload" ]; then
+              echo "::error::[$label] $ns 下既没有名为 $target 的 deployment，也没有同名 statefulset"
+              echo "::error::[$label] 请核对变量 SEALOS_DEPLOYMENT_API / SEALOS_DEPLOYMENT_WEB"
+              echo "::error::[$label] 当前配置的期望名字：$target"
               return 1
             fi
 
-            echo "[$label] $ns 下的 deployment："
-            printf '%s\n' "$list" | sed 's/^/    /'
-
-            if [ -n "$exact" ]; then
-              if printf '%s\n' "$list" | grep -Fxq -- "$exact"; then
-                name="$exact"
-              else
-                echo "::error::[$label] 指定的 $exact 在 $ns 下不存在"
-                fail_hint "$label" "$ns" "$prefix"
-                return 1
-              fi
-            else
-              # 只在完全同名时自动匹配，不做任何前缀猜测
-              name=$(printf '%s\n' "$list" | grep -Fx -- "$prefix" | head -n 1 || true)
-              if [ -z "$name" ]; then
-                fail_hint "$label" "$ns" "$prefix"
-                return 1
-              fi
-              echo "[$label] 未配置 SEALOS_DEPLOYMENT_*，回退到同名匹配：$name"
-            fi
-
-            echo "[$label] 重启 deployment/$name (namespace=$ns)"
-            KUBECONFIG="$cfg" kubectl rollout restart "deployment/$name" -n "$ns"
-            KUBECONFIG="$cfg" kubectl rollout status "deployment/$name" -n "$ns" --timeout=180s
+            echo "[$label] 重启 $workload (namespace=$ns)"
+            KUBECONFIG="$cfg" kubectl rollout restart "$workload" -n "$ns"
+            KUBECONFIG="$cfg" kubectl rollout status "$workload" -n "$ns" --timeout=180s
           }
 
           failed=0
