@@ -50,6 +50,16 @@ export default function MessageList({ messages, onJumpToSource }: Props) {
               </p>
             )}
 
+            {message.stopped && (
+              <p
+                role="status"
+                data-testid="stopped-hint"
+                className="mb-2 rounded-md bg-zinc-100 px-2 py-1.5 text-xs text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400"
+              >
+                已停止生成
+              </p>
+            )}
+
             {message.error && (
               <p role="alert" className="rounded-md bg-red-50 px-2 py-1.5 text-xs text-red-600">
                 {message.error}
@@ -62,7 +72,9 @@ export default function MessageList({ messages, onJumpToSource }: Props) {
                 onJump={(index) => onJumpToSource(message.id, index)}
               />
             ) : (
-              !message.error && <p className="text-xs text-zinc-400">思考中…</p>
+              !message.error && !message.stopped && (
+                <p className="text-xs text-zinc-400">思考中…</p>
+              )
             )}
 
             <SourceCards sources={message.sources} />

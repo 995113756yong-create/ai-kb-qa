@@ -123,7 +123,9 @@ def run_agent(
                     result = {"error": "与之前的调用完全相同，结果同上。请换关键词或开始回答。"}
                 else:
                     seen_calls.add(key)
-                    result = execute_tool(call.name, call.arguments, kb, registry)
+                    result = execute_tool(
+                        call.name, call.arguments, kb, registry, search_k=search_k
+                    )
 
                 ok = "error" not in result
                 consecutive_errors = 0 if ok else consecutive_errors + 1

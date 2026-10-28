@@ -19,6 +19,7 @@ export type ChatMessage =
       sources: Source[];
       grounded: boolean;
       running: boolean;
+      stopped: boolean;
       error: string | null;
       elapsedMs: number | null;
     };

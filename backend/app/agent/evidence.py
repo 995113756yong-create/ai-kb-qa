@@ -7,10 +7,15 @@ from langchain_core.documents import Document
 
 from app.qa import NOT_FOUND_ANSWER, SNIPPET_LEN
 
-# 模型写出的引用形如 [E3]，也可能一行里写多个，如 [E1, E3] / [E1、E3]；
+# 范围引用最多展开这么多个编号，防止模型写出离谱的跨度
+MAX_RANGE_SPAN = 20
+
+# 模型写出的引用写法很杂，实测会用到：
+#   [E3]  【E3】  [ E3 ]  [E1, E3]  [E1、E3]  [E1-E3]
 # 只认登记过的编号，未登记的编号会被剔除
-CITATION_GROUP_RE = re.compile(r"\[([Ee]\d+(?:\s*[,，、]\s*[Ee]\d+)*)\]")
-CITATION_ID_RE = re.compile(r"[Ee](\d+)")
+CITATION_GROUP_RE = re.compile(r"[\[【]\s*([Ee]\d+(?:\s*(?:[,，、\-–—~]\s*[Ee]?\d+)*)?)\s*[\]】]")
+# 从括号内容里抽出所有数字，范围写法在展开时处理
+CITATION_ID_RE = re.compile(r"[Ee]?(\d+)")
 
 
 @dataclass
@@ -91,7 +96,7 @@ class EvidenceRegistry:
         # 先扫一遍确定使用顺序，再据此重编，保证编号与 sources 顺序一致
         used: List[str] = []
         for group in CITATION_GROUP_RE.finditer(answer_text):
-            for number in CITATION_ID_RE.findall(group.group(1)):
+            for number in _expand_numbers(group.group(1)):
                 evidence_id = f"E{number}"
                 if evidence_id not in used and self.get(evidence_id) is not None:
                     used.append(evidence_id)
@@ -99,7 +104,7 @@ class EvidenceRegistry:
         index_of = {evidence_id: i for i, evidence_id in enumerate(used, start=1)}
 
         def _replace(match: "re.Match[str]") -> str:
-            numbers = CITATION_ID_RE.findall(match.group(1))
+            numbers = _expand_numbers(match.group(1))
             # 编造的编号直接删掉，避免在正文里留下无法跳转的标记
             mapped = [index_of[f"E{n}"] for n in numbers if f"E{n}" in index_of]
             if not mapped:
@@ -126,8 +131,36 @@ class EvidenceRegistry:
         }
 
 
+def _expand_numbers(group: str) -> List[int]:
+    """把括号里的内容展开成编号列表，支持 [E1]、[E1, E3]、[E1-E3]。
+
+    范围写法只在两侧都是 E 前缀时展开，避免把 [1-3] 这类误判成引用。
+    """
+    numbers: List[int] = []
+    for part in re.split(r"\s*[,，、]\s*", group.strip()):
+        if not part:
+            continue
+        span = re.fullmatch(r"([Ee]\d+)\s*[-–—~]\s*([Ee]\d+)", part)
+        if span:
+            start, end = int(span.group(1)[1:]), int(span.group(2)[1:])
+            # 反着写也认，但限制跨度，避免模型写出 [E1-E9999] 撑爆
+            low, high = sorted((start, end))
+            if high - low <= MAX_RANGE_SPAN:
+                numbers.extend(range(low, high + 1))
+            else:
+                numbers.extend([start, end])
+            continue
+        found = CITATION_ID_RE.fullmatch(part.strip())
+        if found:
+            numbers.append(int(found.group(1)))
+    return numbers
+
+
 def _is_not_found(answer: str) -> bool:
-    """“未找到”类回答本身不需要引用，也算 grounded。"""
-    if not answer:
-        return False
-    return NOT_FOUND_ANSWER in answer or "未找到" in answer
+    """整段回答就是固定话术时才认作「未找到」。
+
+    不能用 `in` 判断：像「公司成立于 1998 年。股东结构文档未找到」这种
+    混着无引用结论的回答也会被放行，用户就看不到黄色提示了。
+    """
+    normalized = re.sub(r"\s+", "", answer or "").strip("。.!！")
+    return normalized == re.sub(r"\s+", "", NOT_FOUND_ANSWER).strip("。.!！")

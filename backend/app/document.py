@@ -156,25 +156,64 @@ class KnowledgeBase:
         return self._store is None
 
     def add_document(self, doc_id: str, source: str, size: int, chunks: List[Document]) -> None:
+        """先算向量再进锁写入。
+
+        算向量要调外部 Embedding 接口，通常几百毫秒到几秒。如果放在锁里，
+        期间所有检索和删除都会被阻塞，一份大 PDF 就足以卡住线上全部问答。
+        """
         if not chunks:
             raise ValueError("文档内容为空，无法建立索引")
+
+        texts = [c.page_content for c in chunks]
         ids = [c.metadata["chunk_id"] for c in chunks]
+        metadatas = [c.metadata for c in chunks]
+
+        # 锁外完成网络调用
+        vectors = self.embeddings.embed_documents(texts)
+        if len(vectors) != len(texts):
+            raise ValueError("向量数量与片段数量不一致，无法建立索引")
+
+        entry = {
+            "doc_id": doc_id,
+            "filename": source,
+            "ext": os.path.splitext(source)[1].lower(),
+            "size": size,
+            "chunks": len(chunks),
+            "uploaded_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        }
+
         with self._lock:
-            if self._store is None:
-                self._store = FAISS.from_documents(chunks, self.embeddings, ids=ids)
+            # 进锁后重新判断：算向量期间可能有别的上传已经把索创建好了
+            created_store = self._store is None
+            if created_store:
+                self._store = FAISS.from_embeddings(
+                    list(zip(texts, vectors)),
+                    self.embeddings,
+                    metadatas=metadatas,
+                    ids=ids,
+                )
             else:
-                self._store.add_documents(chunks, ids=ids)
-            self._docs.append(
-                {
-                    "doc_id": doc_id,
-                    "filename": source,
-                    "ext": os.path.splitext(source)[1].lower(),
-                    "size": size,
-                    "chunks": len(chunks),
-                    "uploaded_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-                }
-            )
-            self._save()
+                self._store.add_embeddings(list(zip(texts, vectors)), metadatas=metadatas, ids=ids)
+
+            self._docs.append(entry)
+            try:
+                self._save()
+            except Exception:
+                # 落盘失败必须回滚，否则内存里有这份文档、磁盘没有，
+                # 接口却返回 500 且上传文件已被删除，重启后文档凭空消失。
+                self._docs.pop()
+                if created_store:
+                    self._store = None
+                else:
+                    try:
+                        self._store.delete(ids)
+                    except Exception as e:
+                        # 回滚也失败时只能重建索引，避免留下内容缺失的孤儿向量
+                        logger.error("回滚新增向量失败（%s），索引将重建", e)
+                        self._store = None
+                        self._docs = []
+                self._drop_index_files()
+                raise
 
     def search(self, query: str, k: int) -> List[Document]:
         with self._lock:
@@ -190,9 +229,15 @@ class KnowledgeBase:
             if self._store is None:
                 return []
             if doc_id:
-                # 过滤后可用候选会变少，先多取一些再过滤，避免结果不足
+                # FAISS 的 filter 是「先取 fetch_k 条再筛」，不是按条件检索。
+                # 用 k*4 这种小倍数时，只要另一份文档够大就会把候选占满，
+                # 目标文档可能一条都筛不出来。必须把候选放到全量才不会漏。
+                total = int(getattr(self._store.index, "ntotal", 0) or 0)
                 return self._store.similarity_search_with_score(
-                    query, k=k, filter={"doc_id": doc_id}, fetch_k=k * 4
+                    query,
+                    k=k,
+                    filter={"doc_id": doc_id},
+                    fetch_k=max(total, k, 1),
                 )
             return self._store.similarity_search_with_score(query, k=k)
 
@@ -235,8 +280,19 @@ class KnowledgeBase:
             if target is None:
                 return None
 
-            ids = [chunk_id_of(doc_id, i) for i in range(target["chunks"])]
-            self._store.delete(ids)
+            # 清单记录的片段数可能与索引不一致（历史数据、写入中断等），
+            # FAISS.delete 遇到不存在的 ID 会整体抛错，这里先取交集。
+            expected = [chunk_id_of(doc_id, i) for i in range(target["chunks"])]
+            existing = set(self._store.index_to_docstore_id.values())
+            ids = [chunk_id for chunk_id in expected if chunk_id in existing]
+            if ids:
+                self._store.delete(ids)
+            else:
+                logger.warning(
+                    "文档 %s 的片段在索引中均不存在（清单记为 %s 个），只清理清单",
+                    doc_id,
+                    target["chunks"],
+                )
             self._docs = [d for d in self._docs if d["doc_id"] != doc_id]
 
             if getattr(self._store.index, "ntotal", 0):
