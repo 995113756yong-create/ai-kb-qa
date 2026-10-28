@@ -244,29 +244,59 @@ jobs:
           WEB_NAMESPACE: ${{ vars.SEALOS_NAMESPACE_WEB }}
           API_PREFIX: ${{ vars.SEALOS_APP_API || 'ai-kb-qa' }}
           WEB_PREFIX: ${{ vars.SEALOS_APP_WEB || 'ai-kb-qa-web' }}
+          # 显式指定完整 deployment 名（可选）。同 namespace 部署时强烈建议配置，
+          # 因为 ai-kb-qa 与 ai-kb-qa-web 前缀互相包含，自动匹配存在歧义。
+          API_EXACT: ${{ vars.SEALOS_DEPLOYMENT_API }}
+          WEB_EXACT: ${{ vars.SEALOS_DEPLOYMENT_WEB }}
         run: |
           set -eu
 
+          # ---- 目标名解析 ----
+          # ai-kb-qa 和 ai-kb-qa-web 前缀互相包含，任何自动匹配规则都有反例
+          # （ai-kb-qa-web-xxx 同时符合 ai-kb-qa 的"prefix+随机后缀"形态）。
+          # 所以：必须由 SEALOS_DEPLOYMENT_API / SEALOS_DEPLOYMENT_WEB 显式指定。
+          # 只在「恰好等于 prefix」这种无歧义的情况下才允许自动回退。
+          fail_hint() {
+            label="$1"; ns="$2"; prefix="$3"
+            echo "::error::[$label] 无法确定要重启的 deployment。"
+            echo "::error::[$label] 请到仓库 Settings → Variables 添加："
+            echo "::error::[$label]   SEALOS_DEPLOYMENT_API / SEALOS_DEPLOYMENT_WEB"
+            echo "::error::[$label] 值为 $ns 下 kubectl get deployment 的真实名字。"
+            echo "::error::[$label] 当前 prefix=$prefix"
+          }
+
           restart_one() {
-            cfg="$1"; ns="$2"; prefix="$3"; label="$4"
+            cfg="$1"; ns="$2"; prefix="$3"; exact="$4"; label="$5"
 
             if [ -z "$ns" ]; then
               echo "[$label] 未配置 namespace，跳过"
               return 0
             fi
 
-            # 查询本身失败要区分于「查不到」：连不上集群时不能静默跳过
             if ! list=$(KUBECONFIG="$cfg" kubectl get deployment -n "$ns" -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' 2>&1); then
               echo "::error::[$label] 查询 namespace $ns 失败：$list"
               return 1
             fi
 
-            # 前缀匹配可能同时命中 ai-kb-qa 和 ai-kb-qa-web，用完整名字优先
-            name=$(printf '%s\n' "$list" | grep -E "^${prefix}(-[a-z0-9]+)?$" | head -n 1 || true)
+            echo "[$label] $ns 下的 deployment："
+            printf '%s\n' "$list" | sed 's/^/    /'
 
-            if [ -z "$name" ]; then
-              echo "[$label] 在 $ns 下没找到前缀为 $prefix 的 deployment，跳过"
-              return 0
+            if [ -n "$exact" ]; then
+              if printf '%s\n' "$list" | grep -Fxq -- "$exact"; then
+                name="$exact"
+              else
+                echo "::error::[$label] 指定的 $exact 在 $ns 下不存在"
+                fail_hint "$label" "$ns" "$prefix"
+                return 1
+              fi
+            else
+              # 只在完全同名时自动匹配，不做任何前缀猜测
+              name=$(printf '%s\n' "$list" | grep -Fx -- "$prefix" | head -n 1 || true)
+              if [ -z "$name" ]; then
+                fail_hint "$label" "$ns" "$prefix"
+                return 1
+              fi
+              echo "[$label] 未配置 SEALOS_DEPLOYMENT_*，回退到同名匹配：$name"
             fi
 
             echo "[$label] 重启 deployment/$name (namespace=$ns)"
@@ -275,6 +305,6 @@ jobs:
           }
 
           failed=0
-          restart_one "$HOME/.kube/config" "${API_NAMESPACE:-}" "$API_PREFIX" "api" || failed=1
-          restart_one "$HOME/.kube/config-web" "${WEB_NAMESPACE:-}" "$WEB_PREFIX" "web" || failed=1
+          restart_one "$HOME/.kube/config" "${API_NAMESPACE:-}" "$API_PREFIX" "$API_EXACT" "api" || failed=1
+          restart_one "$HOME/.kube/config-web" "${WEB_NAMESPACE:-}" "$WEB_PREFIX" "$WEB_EXACT" "web" || failed=1
           exit "$failed"
