@@ -120,6 +120,10 @@ jobs:
           chmod +x kubectl
           sudo mv kubectl /usr/local/bin/
 
+      # Sealos 的 ServiceAccount 是按 namespace(workspace) 隔离的，
+      # 后端那份 kubeconfig 通常没有前端的 namespace 权限。
+      # 因此支持两份：SEALOS_KUBECONFIG 给后端，SEALOS_KUBECONFIG_WEB 给前端。
+      # 只配了一份时，前端也复用它（同 namespace 部署的场景）。
       - name: Configure kubectl with Sealos kubeconfig
         env:
           KUBECONFIG_CONTENT: ${{ secrets.SEALOS_KUBECONFIG }}
@@ -151,9 +155,36 @@ jobs:
             fi
           done
 
+      - name: Configure kubectl for web namespace
+        env:
+          KUBECONFIG_WEB: ${{ secrets.SEALOS_KUBECONFIG_WEB }}
+        run: |
+          set -eu
+          if [ -z "${KUBECONFIG_WEB:-}" ]; then
+            echo "未配置 SEALOS_KUBECONFIG_WEB，前端复用后端那份"
+            cp "$HOME/.kube/config" "$HOME/.kube/config-web"
+            exit 0
+          fi
+
+          case "$KUBECONFIG_WEB" in
+            apiVersion:*|*"kind: Config"*)
+              printf '%s\n' "$KUBECONFIG_WEB" > "$HOME/.kube/config-web" ;;
+            *)
+              if ! printf '%s' "$KUBECONFIG_WEB" | base64 -d > "$HOME/.kube/config-web" 2>/dev/null; then
+                echo "::error::SEALOS_KUBECONFIG_WEB 既不是 YAML 也不是合法 base64"
+                exit 1
+              fi
+              ;;
+          esac
+          chmod 600 "$HOME/.kube/config-web"
+          echo "已写入前端专用 kubeconfig"
+
       # 关键：先证明能连上集群，否则后面所有 kubectl 查询都会返回空，
       # 被误当成"应用不存在"而静默跳过，造成部署成功但实际没部署的假象。
       - name: Verify cluster connectivity
+        env:
+          API_NAMESPACE: ${{ vars.SEALOS_NAMESPACE_API }}
+          WEB_NAMESPACE: ${{ vars.SEALOS_NAMESPACE_WEB }}
         run: |
           set -eu
 
@@ -172,18 +203,36 @@ jobs:
             ca_len=$(grep "certificate-authority-data:" "$HOME/.kube/config" \
               | sed 's/.*data: //' | tr -d ' ' | awk '{print length($0)}' || echo 0)
             echo "  CA 数据长度: ${ca_len}（正常 1500~3000）"
-            echo "--- 集群返回 ---"
-            kubectl cluster-info 2>&1 | head -n 10 || true
+            echo "--- API 探测 ---"
+            kubectl get --raw /version 2>&1 | head -n 5 || true
           }
 
-          if ! kubectl cluster-info >/dev/null 2>&1; then
-            dump_shape
-            echo "::error::无法连接 Sealos 集群。证书过期请到 Sealos 重新下载 kubeconfig；"
-            echo "::error::若 CA 长度异常说明 Secret 内容被截断，可改用 base64 形式粘贴。"
-            exit 1
-          fi
+          # 不能用 cluster-info：它会去 kube-system 查 Service，
+          # 而 Sealos 给这个 ServiceAccount 的 RBAC 只在自家 namespace 内，
+          # 会报 Forbidden 被误判成"连不上集群"。这里改成最低限度的 API 探测。
+          probe() {
+            cfg="$1"; ns="$2"; label="$3"
+            # /version 不需要业务权限，能应答就说明 TLS 与认证都通了
+            if ! KUBECONFIG="$cfg" kubectl get --raw /version >/dev/null 2>&1; then
+              KUBECONFIG="$cfg" kubectl get --raw /version 2>&1 | head -n 5 || true
+              echo "::error::[$label] 无法访问集群，请检查对应的 kubeconfig"
+              return 1
+            fi
+            if ! KUBECONFIG="$cfg" kubectl auth can-i list deployments -n "$ns" >/dev/null 2>&1; then
+              echo "::error::[$label] 该 kubeconfig 没有 namespace $ns 的权限"
+              echo "::error::[$label] 请到 Sealos 切到 $ns 所在 workspace，另存一份 kubeconfig"
+              echo "::error::[$label] 配到 Secret SEALOS_KUBECONFIG_WEB（前端）或 SEALOS_KUBECONFIG（后端）"
+              return 1
+            fi
+            echo "[$label] namespace $ns 访问正常"
+          }
 
-          echo "集群连通性正常"
+          dump_shape
+
+          failed=0
+          [ -n "${API_NAMESPACE:-}" ] && { probe "$HOME/.kube/config" "$API_NAMESPACE" api || failed=1; }
+          [ -n "${WEB_NAMESPACE:-}" ] && { probe "$HOME/.kube/config-web" "$WEB_NAMESPACE" web || failed=1; }
+          exit "$failed"
 
       # Sealos 的 App Launchpad 会给 deployment 加随机后缀（如 ai-kb-qa-zmtnddmomzjs），
       # 所以不能写死名字：先按前缀找，找到唯一的就直接用，找不到就跳过而不是失败。
@@ -199,7 +248,7 @@ jobs:
           set -eu
 
           restart_one() {
-            ns="$1"; prefix="$2"; label="$3"
+            cfg="$1"; ns="$2"; prefix="$3"; label="$4"
 
             if [ -z "$ns" ]; then
               echo "[$label] 未配置 namespace，跳过"
@@ -207,7 +256,7 @@ jobs:
             fi
 
             # 查询本身失败要区分于「查不到」：连不上集群时不能静默跳过
-            if ! list=$(kubectl get deployment -n "$ns" -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' 2>&1); then
+            if ! list=$(KUBECONFIG="$cfg" kubectl get deployment -n "$ns" -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' 2>&1); then
               echo "::error::[$label] 查询 namespace $ns 失败：$list"
               return 1
             fi
@@ -221,11 +270,11 @@ jobs:
             fi
 
             echo "[$label] 重启 deployment/$name (namespace=$ns)"
-            kubectl rollout restart "deployment/$name" -n "$ns"
-            kubectl rollout status "deployment/$name" -n "$ns" --timeout=180s
+            KUBECONFIG="$cfg" kubectl rollout restart "deployment/$name" -n "$ns"
+            KUBECONFIG="$cfg" kubectl rollout status "deployment/$name" -n "$ns" --timeout=180s
           }
 
           failed=0
-          restart_one "$API_NAMESPACE" "$API_PREFIX" "api" || failed=1
-          restart_one "$WEB_NAMESPACE" "$WEB_PREFIX" "web" || failed=1
+          restart_one "$HOME/.kube/config" "${API_NAMESPACE:-}" "$API_PREFIX" "api" || failed=1
+          restart_one "$HOME/.kube/config-web" "${WEB_NAMESPACE:-}" "$WEB_PREFIX" "web" || failed=1
           exit "$failed"
