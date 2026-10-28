@@ -3,17 +3,85 @@ name: Build, Push and Deploy
 on:
   push:
     branches: [main]
+  pull_request:
+    branches: [main]
 
 env:
-  IMAGE_NAME: ai-kb-qa
+  REGISTRY: ghcr.io
 
 jobs:
+  # ---------- 后端测试 ----------
+  backend-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements*.txt
+
+      - name: Install dependencies
+        run: pip install -r backend/requirements-dev.txt
+
+      - name: Run tests
+        working-directory: backend
+        run: pytest -q
+
+  # ---------- 前端测试 ----------
+  frontend-test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          # jsdom 30 要求 node ^22.22.2，写死到 22.x 最新补丁版
+          node-version: "22.x"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Test
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+  # ---------- 构建并推送两个镜像 ----------
   build-and-push:
+    needs: [backend-test, frontend-test]
+    # PR 只跑测试，不推镜像
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
-
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # 后端沿用 ai-kb-qa 这个名字，Sealos 上已有的部署直接变成 API 服务
+          - image: ai-kb-qa
+            context: ./backend
+          - image: ai-kb-qa-web
+            context: ./frontend
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -21,17 +89,20 @@ jobs:
       - name: Log in to GitHub Container Registry
         uses: docker/login-action@v3
         with:
-          registry: ghcr.io
+          registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build and push
         uses: docker/build-push-action@v6
         with:
-          context: .
+          context: ${{ matrix.context }}
           push: true
-          tags: ghcr.io/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}:latest
+          tags: |
+            ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ matrix.image }}:latest
+            ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ matrix.image }}:${{ github.sha }}
 
+  # ---------- 部署 ----------
   deploy:
     needs: build-and-push
     runs-on: ubuntu-latest
@@ -46,11 +117,21 @@ jobs:
         env:
           KUBECONFIG_CONTENT: ${{ secrets.SEALOS_KUBECONFIG }}
         run: |
-          mkdir -p $HOME/.kube
-          printf '%s' "$KUBECONFIG_CONTENT" > $HOME/.kube/config
-          chmod 600 $HOME/.kube/config
+          mkdir -p "$HOME/.kube"
+          printf '%s' "$KUBECONFIG_CONTENT" > "$HOME/.kube/config"
+          chmod 600 "$HOME/.kube/config"
 
-      - name: Restart deployment on Sealos
+      - name: Restart API deployment
         run: |
           kubectl rollout restart deployment ai-kb-qa -n ns-p93832nn
           kubectl rollout status deployment ai-kb-qa -n ns-p93832nn --timeout=180s
+
+      # 第一次合并时 Sealos 上还没有 web 部署，此时跳过而不是让 job 失败
+      - name: Restart web deployment if it exists
+        run: |
+          if kubectl get deployment ai-kb-qa-web -n ns-p93832nn >/dev/null 2>&1; then
+            kubectl rollout restart deployment ai-kb-qa-web -n ns-p93832nn
+            kubectl rollout status deployment ai-kb-qa-web -n ns-p93832nn --timeout=180s
+          else
+            echo "ai-kb-qa-web 尚未在 Sealos 创建，跳过；请在 App Launchpad 新建后再次运行部署。"
+          fi

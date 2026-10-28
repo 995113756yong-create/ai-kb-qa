@@ -1,0 +1,11 @@
+__pycache__
+*.pyc
+.pytest_cache
+.venv
+.env
+tests
+faiss_index
+faiss_index.legacy-*
+uploads
+logs
+*.md
