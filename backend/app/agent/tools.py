@@ -116,14 +116,19 @@ def list_documents(kb: KnowledgeBase, registry: EvidenceRegistry, args: Dict[str
     }
 
 
-def search_kb(kb: KnowledgeBase, registry: EvidenceRegistry, args: Dict[str, Any]) -> dict:
+def search_kb(
+    kb: KnowledgeBase,
+    registry: EvidenceRegistry,
+    args: Dict[str, Any],
+    default_k: int = AGENT_SEARCH_K,
+) -> dict:
     query = str(args.get("query", "")).strip()
     if not query:
         return {"error": "query 不能为空。请传入检索关键词，例如 {\"query\": \"报销流程\"}"}
     if len(query) > 200:
         return {"error": "query 不能超过 200 字，请缩短后重试"}
 
-    k = _clamp(args.get("k", AGENT_SEARCH_K), 1, 8, AGENT_SEARCH_K)
+    k = _clamp(args.get("k", default_k), 1, 8, default_k)
     doc_id = args.get("doc_id")
     if doc_id is not None and not isinstance(doc_id, str):
         return {"error": "doc_id 必须是字符串，例如 \"3f2a…\"；不确定时不要传这个参数"}
@@ -186,14 +191,23 @@ _HANDLERS: Dict[str, Callable[[KnowledgeBase, EvidenceRegistry, Dict[str, Any]],
 }
 
 
-def execute_tool(name: str, raw_arguments: str, kb: KnowledgeBase, registry: EvidenceRegistry) -> dict:
+def execute_tool(
+    name: str,
+    raw_arguments: str,
+    kb: KnowledgeBase,
+    registry: EvidenceRegistry,
+    search_k: int = AGENT_SEARCH_K,
+) -> dict:
     """执行工具；参数解析 / 校验 / 内部异常都转成 {"error": ...}，不向上抛。"""
     handler = _HANDLERS.get(name)
     if handler is None:
         return {"error": f"没有名为 {name} 的工具。可用工具：{', '.join(_HANDLERS)}"}
     try:
         args = _parse_args(raw_arguments)
-        result = handler(kb, registry, args)
+        if name == "search_kb":
+            result = handler(kb, registry, args, default_k=search_k)
+        else:
+            result = handler(kb, registry, args)
     except ValueError as e:
         return {"error": str(e)}
     except Exception as e:  # 检索失败等内部异常也让模型知道，而不是中断整轮对话

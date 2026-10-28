@@ -7,6 +7,7 @@ import DocSidebar from "@/components/DocSidebar";
 import MessageList from "@/components/MessageList";
 import { ApiError, ask, listDocs, streamAgent } from "@/lib/api";
 import type { ChatMessage, Step } from "@/lib/chat";
+import { stripRawCitations } from "@/lib/answer";
 import type { AgentEvent, ChatMode, DocInfo } from "@/lib/types";
 
 let messageSeq = 0;
@@ -151,6 +152,7 @@ export default function ChatApp() {
         sources: [],
         grounded: true,
         running: true,
+        stopped: false,
         error: null,
         elapsedMs: null,
       };
@@ -184,10 +186,24 @@ export default function ChatApp() {
         await streamAgent(text, (event) => handleAgentEvent(assistantId, event), controller.signal);
       } catch (e) {
         // 用户点“停止”会中断 fetch，这里不当作错误
-        if (!controller.signal.aborted) {
+        if (controller.signal.aborted) {
+          patchMessage(assistantId, (m) =>
+            m.role === "assistant"
+              ? {
+                  ...m,
+                  // 没收到 final，正文里是模型原话的 [E3]，清掉以免显示无法点击的编号
+                  answer: stripRawCitations(m.answer),
+                  running: false,
+                  stopped: true,
+                }
+              : m,
+          );
+        } else {
           const detail = e instanceof ApiError ? e.message : "连接中断，请重试";
           patchMessage(assistantId, (m) =>
-            m.role === "assistant" ? { ...m, error: detail, running: false } : m,
+            m.role === "assistant"
+              ? { ...m, answer: stripRawCitations(m.answer), error: detail, running: false }
+              : m,
           );
         }
       } finally {

@@ -121,17 +121,40 @@ jobs:
           printf '%s' "$KUBECONFIG_CONTENT" > "$HOME/.kube/config"
           chmod 600 "$HOME/.kube/config"
 
-      - name: Restart API deployment
+      # Sealos 的 App Launchpad 会给 deployment 加随机后缀（如 ai-kb-qa-zmtnddmomzjs），
+      # 所以不能写死名字：先按前缀找，找到唯一的就直接用，找不到就跳过而不是失败。
+      - name: Restart deployments
+        env:
+          # 两个都在仓库 Settings → Variables 里配；namespace 必须改对，
+          # 前后端当前不在同一个 namespace
+          API_NAMESPACE: ${{ vars.SEALOS_NAMESPACE_API }}
+          WEB_NAMESPACE: ${{ vars.SEALOS_NAMESPACE_WEB }}
+          API_PREFIX: ${{ vars.SEALOS_APP_API || 'ai-kb-qa' }}
+          WEB_PREFIX: ${{ vars.SEALOS_APP_WEB || 'ai-kb-qa-web' }}
         run: |
-          kubectl rollout restart deployment ai-kb-qa -n ns-p93832nn
-          kubectl rollout status deployment ai-kb-qa -n ns-p93832nn --timeout=180s
+          set -eu
 
-      # 第一次合并时 Sealos 上还没有 web 部署，此时跳过而不是让 job 失败
-      - name: Restart web deployment if it exists
-        run: |
-          if kubectl get deployment ai-kb-qa-web -n ns-p93832nn >/dev/null 2>&1; then
-            kubectl rollout restart deployment ai-kb-qa-web -n ns-p93832nn
-            kubectl rollout status deployment ai-kb-qa-web -n ns-p93832nn --timeout=180s
-          else
-            echo "ai-kb-qa-web 尚未在 Sealos 创建，跳过；请在 App Launchpad 新建后再次运行部署。"
-          fi
+          restart_one() {
+            ns="$1"; prefix="$2"; label="$3"
+
+            if [ -z "$ns" ]; then
+              echo "[$label] 未配置 namespace，跳过"
+              return 0
+            fi
+
+            # 前缀匹配可能同时命中 ai-kb-qa 和 ai-kb-qa-web，用完整名字优先
+            name=$(kubectl get deployment -n "$ns" -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' \
+              | grep -E "^${prefix}(-[a-z0-9]+)?$" | head -n 1 || true)
+
+            if [ -z "$name" ]; then
+              echo "[$label] 在 $ns 下没找到前缀为 $prefix 的 deployment，跳过"
+              return 0
+            fi
+
+            echo "[$label] 重启 deployment/$name (namespace=$ns)"
+            kubectl rollout restart "deployment/$name" -n "$ns"
+            kubectl rollout status "deployment/$name" -n "$ns" --timeout=180s
+          }
+
+          restart_one "$API_NAMESPACE" "$API_PREFIX" "api"
+          restart_one "$WEB_NAMESPACE" "$WEB_PREFIX" "web"
