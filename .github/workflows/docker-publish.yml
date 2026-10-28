@@ -117,9 +117,45 @@ jobs:
         env:
           KUBECONFIG_CONTENT: ${{ secrets.SEALOS_KUBECONFIG }}
         run: |
+          set -eu
           mkdir -p "$HOME/.kube"
-          printf '%s' "$KUBECONFIG_CONTENT" > "$HOME/.kube/config"
+
+          # 两种形式都支持：
+          #   1) 直接贴 YAML（多行，Secret 输入框可能压掉换行）
+          #   2) 贴 base64（单行，不会被换行破坏，推荐）
+          case "$KUBECONFIG_CONTENT" in
+            apiVersion:*|*"kind: Config"*)
+              printf '%s\n' "$KUBECONFIG_CONTENT" > "$HOME/.kube/config"
+              ;;
+            *)
+              if ! printf '%s' "$KUBECONFIG_CONTENT" | base64 -d > "$HOME/.kube/config" 2>/dev/null; then
+                echo "::error::SEALOS_KUBECONFIG 既不是 YAML 也不是合法 base64"
+                exit 1
+              fi
+              ;;
+          esac
           chmod 600 "$HOME/.kube/config"
+
+          # 结构自检：缺了这几行 kubectl 一定连不上，早点报清楚
+          for key in "server:" "certificate-authority-data:|insecure-skip-tls-verify:" "token:|client-certificate:"; do
+            if ! grep -Eq "$key" "$HOME/.kube/config"; then
+              echo "::error::kubeconfig 缺少 ${key%%|*} 字段，Secret 内容可能被截断"
+              exit 1
+            fi
+          done
+
+      # 关键：先证明能连上集群，否则后面所有 kubectl 查询都会返回空，
+      # 被误当成"应用不存在"而静默跳过，造成部署成功但实际没部署的假象。
+      - name: Verify cluster connectivity
+        run: |
+          set -eu
+          if ! kubectl cluster-info >/dev/null 2>&1; then
+            echo "::error::无法连接 Sealos 集群，请检查 SEALOS_KUBECONFIG（证书或 token 可能已失效）"
+            kubectl cluster-info || true
+            exit 1
+          fi
+          echo "集群连通性正常"
+          kubectl version --output=yaml 2>/dev/null | head -n 5 || true
 
       # Sealos 的 App Launchpad 会给 deployment 加随机后缀（如 ai-kb-qa-zmtnddmomzjs），
       # 所以不能写死名字：先按前缀找，找到唯一的就直接用，找不到就跳过而不是失败。
@@ -142,9 +178,14 @@ jobs:
               return 0
             fi
 
+            # 查询本身失败要区分于「查不到」：连不上集群时不能静默跳过
+            if ! list=$(kubectl get deployment -n "$ns" -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' 2>&1); then
+              echo "::error::[$label] 查询 namespace $ns 失败：$list"
+              return 1
+            fi
+
             # 前缀匹配可能同时命中 ai-kb-qa 和 ai-kb-qa-web，用完整名字优先
-            name=$(kubectl get deployment -n "$ns" -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' \
-              | grep -E "^${prefix}(-[a-z0-9]+)?$" | head -n 1 || true)
+            name=$(printf '%s\n' "$list" | grep -E "^${prefix}(-[a-z0-9]+)?$" | head -n 1 || true)
 
             if [ -z "$name" ]; then
               echo "[$label] 在 $ns 下没找到前缀为 $prefix 的 deployment，跳过"
@@ -156,5 +197,7 @@ jobs:
             kubectl rollout status "deployment/$name" -n "$ns" --timeout=180s
           }
 
-          restart_one "$API_NAMESPACE" "$API_PREFIX" "api"
-          restart_one "$WEB_NAMESPACE" "$WEB_PREFIX" "web"
+          failed=0
+          restart_one "$API_NAMESPACE" "$API_PREFIX" "api" || failed=1
+          restart_one "$WEB_NAMESPACE" "$WEB_PREFIX" "web" || failed=1
+          exit "$failed"
