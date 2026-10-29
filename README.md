@@ -37,6 +37,9 @@ FastAPI（端口 8000，全部 AI 逻辑在这里）
 | 模型接入 | 官方 openai SDK（兼容硅基流动等 OpenAI 协议服务） |
 | RAG 工具链 | LangChain（文档加载、切分、FAISS 向量库） |
 | 向量数据库 | FAISS |
+| 关键词检索 | 自实现 BM25（无额外依赖） |
+| 检索融合 | 归一化加权 + max 合并 |
+| 工具协议 | 自实现 MCP Server（JSON-RPC 2.0 over stdio） |
 | Embedding | BAAI/bge-large-zh-v1.5（硅基流动） |
 | 对话模型 | `Qwen/Qwen2.5-7B-Instruct`（固定 RAG）/ `deepseek-ai/DeepSeek-V4.1-Flash`（Agent） |
 | 容器化 | Docker（后端 + 前端多阶段构建）+ docker compose |
@@ -317,6 +320,152 @@ kubectl auth can-i list deployments -n "$ns"    # 再验证目标 namespace
 **ServiceAccount 按 namespace 隔离。** 一份 kubeconfig 只能操作自己的 namespace。前后端在不同 workspace 时需要两份，分别配到 `SEALOS_KUBECONFIG` 和 `SEALOS_KUBECONFIG_WEB`。
 
 **不要靠命名规则猜 workload 名。** `ai-kb-qa` 和 `ai-kb-qa-web` 前缀互相包含，`ai-kb-qa-web-xxx` 同时符合「ai-kb-qa + 随机后缀」和「ai-kb-qa-web + 随机后缀」两种解读，纯字符串规则无法区分。用仓库变量显式指定。
+
+## 混合检索
+
+### 为什么需要
+
+纯向量检索靠语义相似度，对**精确标识符**天然失效——`配置 6145`、`GB1001` 这类 token
+在嵌入空间里几乎没有语义信息，与周围几十个结构相同的编号等价。实测：
+
+```
+查询「配置 6202 执行时间」
+  纯向量 Top-5  →  全部是 6045 / 6080 / 6124 这些相邻编号，目标片段不在其中
+  BM25  Top-1   →  正好是 6202 那一条
+```
+
+### 实现
+
+```
+查询 ──┬─→ 向量检索 Top-10 ─┐
+      │                    ├─→ 归一化 → 加权 → max 合并 → Top-K
+      └─→ BM25  Top-10 ────┘
+```
+
+**分词**（`retrieval.py:tokenize`）：不引依赖，自己切。
+
+- 英文/数字/型号整体保留：`GB1001`、`6145` 不被拆碎，这是精确命中的前提
+- 中文切单字 + 双字：「推送任务」→ `推`/`送`/`任`/`务`/`推送`/`送任`/`任务`
+
+**融合**（`fuse_scores`）：归一化后加权，同片段取 **max** 而非 sum。
+
+> 为什么取 max 而不是相加：一个片段在两路都出现，不代表它比「一路强烈命中」更相关。
+> 实测中向量路的噪声经常也在 BM25 路的中游，相加会把这些噪声顶到第一，
+> 把真正的精确命中挤下去。取 max 后「BM25 第 1」不会再被「向量第 1 + BM25 第 5」反超。
+
+**权重**：`HYBRID_BM25_WEIGHT=3.0` / `HYBRID_VECTOR_WEIGHT=1.0`。
+
+### 效果（20 个探针，隔离测试）
+
+| 方案 | 语义类 | 精确编号类 | 总计 |
+|------|:------:|:---------:|-----:|
+| 纯向量 | 4/4 | 14/16 | 18/20 = **90.0%** |
+| 混合检索 | 4/4 | 16/16 | 20/20 = **100.0%** |
+
+复现命令：
+
+```bash
+python -m eval.bench_retrieval
+```
+
+## 评测
+
+### 两层评测
+
+| 层 | 文件 | 测什么 | 是否需要模型 |
+|----|------|--------|:---:|
+| 端到端 | `eval/cases.jsonl` + `run_eval.py` | Agent 完整链路：检索、回答、引用、拒答 | 是 |
+| 检索层 | `eval/retrieval_probes.jsonl` + `bench_retrieval.py` | 只测单次检索的召回 | 仅 Embedding |
+
+**为什么要分层**：Agent 会多轮换关键词重试，会把单次检索的短板掩盖掉。
+要证明混合检索的价值，必须隔离「检索」这一个变量，否则测出来的提升全是 Agent 的功劳。
+
+### 用法
+
+```bash
+# 端到端（会清空并重灌固定语料，产生模型费用）
+python -m eval.run_eval --base http://localhost:8000 --out eval/report.md
+
+# 只测检索层（快，便宜）
+python -m eval.bench_retrieval
+
+# 不联网，验证脚本本身
+python -m eval.run_eval --mock
+```
+
+### 指标
+
+| 指标 | 含义 |
+|------|------|
+| 检索命中率 | 期望文档出现在 sources 中 |
+| 回答命中率 | 回答包含期望要点 |
+| 引用准确率 | 每个 `[n]` 都能对应到 sources |
+| 拒答准确率 | 文档无答案时给出固定话术 |
+| 精确编号命中 | 配置号/型号类检索，混合检索的重点改善项 |
+| 整体通过率 | 三项判定全部通过 |
+
+### 评测集怎么设计
+
+```
+fact       单点事实，向量检索轻松
+compare    跨文档，考验 Agent 是否分头检索
+precise    配置号/型号，纯向量检索的短板
+multi_hop  需要多步推理
+reject     必须拒答，考验防幻觉
+```
+
+16 条端到端用例 + 20 条检索探针。语料 5 份文档、42 个片段，
+其中配置号与型号故意做成大量结构相似的噪声，让语义检索无法区分。
+
+## MCP 接入
+
+### 为什么
+
+工具层原本绑死在 `agent/tools.py`，只能本项目用。抽象成 MCP Server 后，
+任何支持 MCP 的客户端（Claude Desktop、Cursor 等）都能直接接入这个知识库。
+
+### 实现
+
+`app/mcp_server.py`，**零新增依赖**——用标准库实现 JSON-RPC 2.0 over stdio。
+
+只实现三个方法：
+
+| 方法 | 作用 |
+|------|------|
+| `initialize` | 握手，返回协议版本与能力 |
+| `tools/list` | 返回工具定义，**复用 `agent/tools.py` 的同一份 schema** |
+| `tools/call` | 执行工具，结果包成 MCP 的 `content` 数组 |
+
+### 启动
+
+```bash
+cd backend
+python -m app.mcp_server
+```
+
+读取 `FAISS_DIR` 指向的知识库，通过 stdin/stdout 收发 JSON-RPC。
+**stdout 只输出协议数据**，日志一律走 stderr，否则会破坏协议流。
+
+### 客户端配置示例（Claude Desktop）
+
+```json
+{
+  "mcpServers": {
+    "kb-qa": {
+      "command": "python",
+      "args": ["-m", "app.mcp_server"],
+      "cwd": "/path/to/ai-kb-qa/backend"
+    }
+  }
+}
+```
+
+### 协议细节
+
+- 通知（无 `id` 的消息）**永远不响应**，包括方法不存在的情况——这是 JSON-RPC 2.0 的硬要求
+- 工具内部错误（参数不对、编号不存在）返回 `isError: true` + 文本说明，让调用方自行判断
+- 协议层错误（方法不存在、缺必填参数）返回 JSON-RPC `error`，错误码遵循规范
+- 解析失败的请求返回 `-32700`，且**不中断后续请求**
 
 ## 测试
 

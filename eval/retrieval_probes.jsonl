@@ -1,0 +1,33 @@
+# 检索层探针：直接测「单次检索能不能把目标片段找回来」
+#
+# 与 cases.jsonl 的区别：这是隔离测试，不走 Agent、不重试，
+# 只测一次 search 的召回能力。用来证明混合检索的价值。
+#
+# expect_keyword：除了文档名，还要求片段内容包含这个词，
+#   因为同一文档里可能有多个相似编号的片段。
+
+# ---- 语义类：纯向量应该都能命中 ----
+{"query": "产品A的月费是多少", "expect_doc": "产品A.txt", "expect_keyword": "30", "note": "语义明确"}
+{"query": "产品B包含哪些功能", "expect_doc": "产品B.txt", "expect_keyword": "审计日志", "note": "语义明确"}
+{"query": "产品E支持多少成员", "expect_doc": "其他产品.txt", "expect_keyword": "100", "note": "干扰文档里的目标"}
+{"query": "哪个产品支持单点登录", "expect_doc": "产品B.txt", "expect_keyword": "单点登录", "any_doc": true, "note": "功能检索，多个文档都有"}
+{"query": "年费是多少", "expect_doc": "产品B.txt", "expect_keyword": "500", "note": "价格类"}
+
+# ---- 精确编号类：纯向量的短板，混合检索的重点收益 ----
+{"query": "配置 6145", "expect_doc": "推送配置清单.txt", "expect_keyword": "6145", "note": "纯编号"}
+{"query": "配置 6152 负责人", "expect_doc": "推送配置清单.txt", "expect_keyword": "6152", "note": "编号+属性"}
+{"query": "配置 6202 执行时间", "expect_doc": "推送配置清单.txt", "expect_keyword": "6202", "note": "末尾编号，最容易被排挤"}
+{"query": "配置 6146 是哪个产品的", "expect_doc": "推送配置清单.txt", "expect_keyword": "6146", "note": "编号+归属"}
+{"query": "配置 6145 是谁负责的", "expect_doc": "推送配置清单.txt", "expect_keyword": "zhangsan", "note": "编号+人名"}
+{"query": "配置 6152 失败会重试吗", "expect_doc": "推送配置清单.txt", "expect_keyword": "6152", "note": "编号+行为"}
+{"query": "GB1001 容量", "expect_doc": "规格型号.txt", "expect_keyword": "GB1001", "note": "型号编码"}
+{"query": "GB2006", "expect_doc": "规格型号.txt", "expect_keyword": "GB2006", "note": "型号单独出现"}
+{"query": "GB2005 是什么", "expect_doc": "规格型号.txt", "expect_keyword": "GB2005", "note": "型号+疑问"}
+{"query": "GB1000 的扩展容量", "expect_doc": "规格型号.txt", "expect_keyword": "GB1000", "note": "型号+属性"}
+{"query": "归档专用型号是哪个", "expect_doc": "规格型号.txt", "expect_keyword": "GB2005", "note": "语义描述，反查型号"}
+{"query": "哪个型号支持夜间写入", "expect_doc": "规格型号.txt", "expect_keyword": "GB2006", "note": "语义描述，反查型号"}
+
+# ---- 混合型：语义词 + 编号 ----
+{"query": "产品A 配置 6145 负责人", "expect_doc": "推送配置清单.txt", "expect_keyword": "zhangsan", "note": "混合型"}
+{"query": "产品B 报警 配置", "expect_doc": "推送配置清单.txt", "expect_keyword": "6152", "note": "语义映射到编号"}
+{"query": "汇总任务配置号 6202", "expect_doc": "推送配置清单.txt", "expect_keyword": "6202", "note": "混合型"}
