@@ -2,7 +2,7 @@
 
 上传文档后自动切分、向量化，再基于文档内容回答问题。系统提供两条问答路径：**固定 RAG**（一次检索）作为对照基线，**手写 ReAct Agent**（多步检索 + 证据引用 + 流式输出）作为主路径。
 
-**在线演示**：https://suinlwijcdst.cloud.sealos.io
+**在线演示**：https://ldflnavviuft.cloud.sealos.io
 
 ## 架构
 
@@ -38,7 +38,7 @@ FastAPI（端口 8000，全部 AI 逻辑在这里）
 | RAG 工具链 | LangChain（文档加载、切分、FAISS 向量库） |
 | 向量数据库 | FAISS |
 | Embedding | BAAI/bge-large-zh-v1.5（硅基流动） |
-| 对话模型 | Qwen/Qwen2.5-7B-Instruct（固定 RAG）/ Qwen/Qwen2.5-72B-Instruct（Agent） |
+| 对话模型 | `Qwen/Qwen2.5-7B-Instruct`（固定 RAG）/ `deepseek-ai/DeepSeek-V4.1-Flash`（Agent） |
 | 容器化 | Docker（后端 + 前端多阶段构建）+ docker compose |
 | CI/CD | GitHub Actions |
 | 云部署 | Sealos Cloud |
@@ -133,7 +133,7 @@ npm run dev                     # 访问 http://localhost:3000
 | `OPENAI_API_BASE` | `https://api.siliconflow.cn/v1` | OpenAI 兼容接口地址 |
 | `EMBEDDING_MODEL` | `BAAI/bge-large-zh-v1.5` | 向量模型 |
 | `CHAT_MODEL` | `Qwen/Qwen2.5-7B-Instruct` | 固定 RAG 的对话模型 |
-| `AGENT_MODEL` | `Qwen/Qwen2.5-72B-Instruct` | Agent 模型，必须支持 OpenAI 的 tools 调用 |
+| `AGENT_MODEL` | `deepseek-ai/DeepSeek-V4.1-Flash` | Agent 模型，必须支持 OpenAI 的 tools 调用 |
 | `AGENT_MAX_STEPS` | `6` | 研究阶段最多调用几轮模型 |
 | `AGENT_SEARCH_K` | `5` | `search_kb` 默认返回的片段数（`run_agent` 调用时会覆盖工具内的默认值） |
 | `AGENT_LOG_DIR` | `backend/logs` | Agent 运行日志目录 |
@@ -278,6 +278,45 @@ npm run dev                     # 访问 http://localhost:3000
 - **失败归因**：带 `error` 字段的行单独统计，区分模型报错、工具异常和超时。
 
 写日志失败只打 warning，不影响响应——日志是旁路，不能成为新的故障点。
+
+## 模型选择
+
+Agent 循环依赖模型的 function calling 能力，选型时实测过这几个（同一份工具定义、同一个提示词）：
+
+| 模型 | 是否主动调工具 | 说明 |
+|------|:---:|------|
+| `deepseek-ai/DeepSeek-V4.1-Flash` | ✅ | 主动检索，参数合理，性价比高（当前默认） |
+| `Qwen/Qwen3-32B` | ✅ | 正常发起调用 |
+| `Qwen/Qwen2.5-72B-Instruct` | ⚠️ | 会反问用户而不检索，需更强提示词约束 |
+| `Qwen/Qwen2.5-7B-Instruct` | ❌ | 工具调用不稳定，只适合固定 RAG |
+
+换模型只需改 `AGENT_MODEL` 环境变量，代码不用动，因为 `agent/llm.py` 走的是标准 OpenAI 协议。
+
+固定 RAG（`/api/ask`）不走工具调用，用 7B 就够，成本和延迟都更低。
+
+## 部署踩坑
+
+项目在 Sealos 上部署时踩过几个坑，记录下来避免重复踩：
+
+**Sealos 的 Service 名 ≠ workload 名。** 内网地址形如 `http://ai-kb-qa-zmtnddmomzjs.ns-dcnh2ec4:8000`，其中 `ai-kb-qa-zmtnddmomzjs` 是 **Service** 名，Deployment/StatefulSet 的名字是 `ai-kb-qa`。`kubectl rollout restart` 要用后者。
+
+**挂了持久卷的应用是 StatefulSet。** Sealos App Launchpad 对需要持久化的应用用 StatefulSet（Pod 名 `app-0`），无状态应用用 Deployment（Pod 名 `app-hash-xxxx`）。CI 里查目标时必须两种都查：
+
+```bash
+kubectl get statefulset -n "$ns"    # 后端（挂了 uploads / faiss_index）
+kubectl get deployment  -n "$ns"    # 前端
+```
+
+**`kubectl cluster-info` 会因 RBAC 失败。** 它要读 `kube-system` 里的 Service，而 Sealos 的 ServiceAccount 只有自己 namespace 的权限，会报 `Forbidden`，容易被误判成「连不上集群」。连通性探测应改用：
+
+```bash
+kubectl get --raw /version                      # 只要 API 应答即可，无需业务权限
+kubectl auth can-i list deployments -n "$ns"    # 再验证目标 namespace
+```
+
+**ServiceAccount 按 namespace 隔离。** 一份 kubeconfig 只能操作自己的 namespace。前后端在不同 workspace 时需要两份，分别配到 `SEALOS_KUBECONFIG` 和 `SEALOS_KUBECONFIG_WEB`。
+
+**不要靠命名规则猜 workload 名。** `ai-kb-qa` 和 `ai-kb-qa-web` 前缀互相包含，`ai-kb-qa-web-xxx` 同时符合「ai-kb-qa + 随机后缀」和「ai-kb-qa-web + 随机后缀」两种解读，纯字符串规则无法区分。用仓库变量显式指定。
 
 ## 测试
 
