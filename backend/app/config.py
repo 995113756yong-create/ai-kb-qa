@@ -32,4 +32,11 @@ CHUNK_OVERLAP = int(os.getenv("CHUNK_OVERLAP", "50"))
 AGENT_MODEL = os.getenv("AGENT_MODEL", "deepseek-ai/DeepSeek-V4.1-Flash")
 AGENT_MAX_STEPS = int(os.getenv("AGENT_MAX_STEPS", "6"))
 AGENT_SEARCH_K = int(os.getenv("AGENT_SEARCH_K", "5"))
+# 混合检索：向量 + BM25 关键词，用 RRF 融合。
+# 纯向量对「配置 6145」这类精确编号无效，BM25 补足这部分召回。
+HYBRID_SEARCH_ENABLED = os.getenv("HYBRID_SEARCH_ENABLED", "true").lower() == "true"
+RRF_K = int(os.getenv("RRF_K", "60"))
+HYBRID_VECTOR_WEIGHT = float(os.getenv("HYBRID_VECTOR_WEIGHT", "1.0"))
+HYBRID_BM25_WEIGHT = float(os.getenv("HYBRID_BM25_WEIGHT", "3.0"))
+
 AGENT_LOG_DIR = os.getenv("AGENT_LOG_DIR", os.path.join(BACKEND_DIR, "logs"))

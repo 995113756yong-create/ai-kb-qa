@@ -17,9 +17,14 @@ from app.config import (
     CHUNK_OVERLAP,
     CHUNK_SIZE,
     EMBEDDING_MODEL,
+    HYBRID_BM25_WEIGHT,
+    HYBRID_SEARCH_ENABLED,
+    HYBRID_VECTOR_WEIGHT,
+    RRF_K,
     OPENAI_API_BASE,
     OPENAI_API_KEY,
 )
+from app.retrieval import BM25Index, hybrid_search
 
 MANIFEST_FILE = "docs.json"
 MANIFEST_VERSION = 2
@@ -81,6 +86,9 @@ class KnowledgeBase:
         self._lock = threading.Lock()
         self._store: Optional[FAISS] = None
         self._docs: List[dict] = []
+        # BM25 索引：纯内存，从 FAISS 的 docstore 重建，不额外落盘
+        self._bm25 = BM25Index()
+        self.hybrid_enabled = HYBRID_SEARCH_ENABLED
         self._load()
 
     # ---------- 持久化 ----------
@@ -119,6 +127,8 @@ class KnowledgeBase:
         )
         with open(self._manifest_path(), encoding="utf-8") as f:
             self._docs = json.load(f).get("docs", [])
+
+        self._rebuild_bm25()
 
     def _manifest_is_current(self) -> bool:
         path = self._manifest_path()
@@ -196,6 +206,7 @@ class KnowledgeBase:
                 self._store.add_embeddings(list(zip(texts, vectors)), metadatas=metadatas, ids=ids)
 
             self._docs.append(entry)
+            self._rebuild_bm25()
             try:
                 self._save()
             except Exception:
@@ -215,11 +226,48 @@ class KnowledgeBase:
                 self._drop_index_files()
                 raise
 
+    def _rebuild_bm25(self) -> None:
+        """从 FAISS 的 docstore 重建 BM25 索引。
+
+        BM25 只依赖原文，不落盘：重启时从向量库的 docstore 直接重建，
+        省掉一份持久化数据，也不会出现两份索引不一致的问题。
+        """
+        if self._store is None:
+            self._bm25 = BM25Index()
+            return
+
+        docstore = self._store.docstore
+        docs: List[Document] = []
+        ids: List[str] = []
+        for cid, stored in docstore._dict.items():
+            if isinstance(stored, Document):
+                docs.append(stored)
+                ids.append(str(cid))
+
+        self._bm25 = BM25Index()
+        self._bm25.build(docs, ids)
+
     def search(self, query: str, k: int) -> List[Document]:
+        """检索入口：混合模式返回 RRF 融合结果，否则退回纯向量。"""
         with self._lock:
             if self._store is None:
                 return []
-            return self._store.similarity_search(query, k=k)
+
+            if not self.hybrid_enabled:
+                return self._store.similarity_search(query, k=k)
+
+            # 两路召回都多取一些候选，给 RRF 更大的融合空间
+            fetch = max(k * 2, k + 2)
+            vector_hits = self._store.similarity_search_with_score(query, k=fetch)
+            bm25_hits = self._bm25.search(query, k=fetch)
+            return hybrid_search(
+                vector_hits,
+                bm25_hits,
+                limit=k,
+                rrf_k=RRF_K,
+                vector_weight=HYBRID_VECTOR_WEIGHT,
+                bm25_weight=HYBRID_BM25_WEIGHT,
+            )
 
     def search_with_scores(
         self, query: str, k: int, doc_id: Optional[str] = None
@@ -296,10 +344,14 @@ class KnowledgeBase:
             self._docs = [d for d in self._docs if d["doc_id"] != doc_id]
 
             if getattr(self._store.index, "ntotal", 0):
+                # 删除后必须重建 BM25，否则已删片段还能被关键词路召回，
+                # 出现「向量库没有、BM25 还能搜到」的不一致。
+                self._rebuild_bm25()
                 self._save()
             else:
                 # 索引空了就彻底清掉，下次上传重建，避免残留空索引
                 self._store = None
+                self._bm25 = BM25Index()
                 self._drop_index_files()
                 self._write_manifest()
             return target

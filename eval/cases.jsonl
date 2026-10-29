@@ -1,0 +1,44 @@
+# 评测用例
+#
+# 每行一个 JSON，字段说明：
+#   id            用例编号
+#   question      提问内容
+#   category      分类：fact / compare / precise / reject / multi_hop
+#   expect_keywords  回答里必须出现的关键词（任一命中即可）
+#   expect_sources   期望命中的文档文件名，用于算检索命中率
+#   expect_min_sources  至少引用几个不同文档（对比类）
+#   expect_answer     期望的完整回答（拒答类）
+#   note          备注
+#
+# 设计意图：
+#   fact   —— 单点事实，向量检索轻松
+#   compare —— 跨文档，考验 Agent 是否分头检索
+#   precise —— 配置号/型号这类精确标识符，纯向量检索的短板
+#   multi_hop —— 需要多步推理
+#   reject —— 必须拒答，考验防幻觉
+
+{"id": "f1", "category": "fact", "question": "产品A的月费是多少？", "expect_keywords": ["30"], "expect_sources": ["产品A.txt"], "note": "基础事实"}
+{"id": "f2", "category": "fact", "question": "产品A最多支持多少个成员？", "expect_keywords": ["5"], "expect_sources": ["产品A.txt"], "note": "数字事实"}
+{"id": "f3", "category": "fact", "question": "产品B的存储空间有多大？", "expect_keywords": ["500"], "expect_sources": ["产品B.txt"], "note": "数量单位"}
+{"id": "f4", "category": "fact", "question": "产品A超出成员数要怎么加购？", "expect_keywords": ["10"], "expect_sources": ["产品A.txt"], "note": "带条件的规则"}
+{"id": "f5", "category": "fact", "question": "产品B支持按月退订吗？", "expect_keywords": ["不支持", "按年"], "expect_sources": ["产品B.txt"], "note": "否定型事实，容易答反"}
+
+{"id": "c1", "category": "compare", "question": "产品A和产品B的月费分别是多少？", "expect_keywords": ["30", "50"], "expect_min_sources": 2, "note": "跨文档对比"}
+{"id": "c2", "category": "compare", "question": "产品B有哪些产品A没有的功能？", "expect_keywords": ["审计日志", "单点登录"], "expect_sources": ["产品B.txt"], "note": "差集型对比"}
+{"id": "c3", "category": "compare", "question": "产品B和产品E哪个支持的成员更多？", "expect_keywords": ["100"], "expect_min_sources": 2, "note": "需要定位到干扰文档里的产品E"}
+
+{"id": "p1", "category": "precise", "question": "配置 6145 对应哪个产品的推送任务？", "expect_keywords": ["产品 A", "产品A"], "expect_sources": ["推送配置清单.txt"], "note": "精确编号，向量检索极易定位到相邻编号"}
+{"id": "p2", "category": "precise", "question": "配置 6152 的负责人是谁？", "expect_keywords": ["lisi"], "expect_sources": ["推送配置清单.txt"], "note": "编号+人名的精确组合"}
+{"id": "p3", "category": "precise", "question": "GB1001 这个型号的标准容量是多少？", "expect_keywords": ["500"], "expect_sources": ["规格型号.txt"], "note": "型号编码，与语义无关"}
+{"id": "p4", "category": "precise", "question": "GB2006 这个型号有什么限制？", "expect_keywords": ["夜间", "备份"], "expect_sources": ["规格型号.txt"], "note": "型号+条件"}
+{"id": "p5", "category": "precise", "question": "配置 6202 什么时候执行？", "expect_keywords": ["周五", "18"], "expect_sources": ["推送配置清单.txt"], "note": "末尾编号，候选池容易被前面的挤掉"}
+
+{"id": "m1", "category": "multi_hop", "question": "如果团队有10个人，产品A需要额外付多少成员费？", "expect_keywords": ["50", "10"], "expect_sources": ["产品A.txt"], "note": "需要先算出超出5人，再乘10元"}
+{"id": "m2", "category": "multi_hop", "question": "预算50元以内且必须支持单点登录，应该选哪个产品？", "expect_keywords": ["产品 B", "产品B"], "expect_min_sources": 2, "note": "条件筛选，需要同时看多个产品"}
+{"id": "m3", "category": "multi_hop", "question": "产品A的默认推送任务配置号和负责人分别是什么？", "expect_keywords": ["6145", "zhangsan"], "expect_sources": ["推送配置清单.txt"], "note": "跨问题类型组合"}
+
+{"id": "r1", "category": "reject", "question": "量子纠缠在生物体内的作用机制是什么？", "expect_answer": "文档中未找到相关信息。", "note": "完全无关"}
+{"id": "r2", "category": "reject", "question": "今天北京的天气怎么样？", "expect_answer": "文档中未找到相关信息。", "note": "实时信息"}
+{"id": "r3", "category": "reject", "question": "产品C的月费是多少？", "expect_answer": "文档中未找到相关信息。", "note": "相似但不存在，最易幻觉"}
+{"id": "r4", "category": "reject", "question": "配置 9999 是谁负责的？", "expect_answer": "文档中未找到相关信息。", "note": "编号格式对但不存在"}
+{"id": "r5", "category": "reject", "question": "请介绍一下贵公司的组织架构和员工人数。", "expect_answer": "文档中未找到相关信息。", "note": "超出文档范围"}
