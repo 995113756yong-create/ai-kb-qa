@@ -27,8 +27,9 @@ CHUNK_SIZE = int(os.getenv("CHUNK_SIZE", "500"))
 CHUNK_OVERLAP = int(os.getenv("CHUNK_OVERLAP", "50"))
 
 # Agent（手写 ReAct 循环）
-# 7B 模型的工具调用不稳定，只用于固定 RAG；Agent 默认用支持 tools 的 72B
-AGENT_MODEL = os.getenv("AGENT_MODEL", "Qwen/Qwen2.5-72B-Instruct")
+# Agent 依赖 function calling：实测 DeepSeek-V4.1-Flash 与 Qwen3-32B 会主动检索，
+# 7B 不稳定只用于固定 RAG。换模型改这个环境变量即可，代码无需改动。
+AGENT_MODEL = os.getenv("AGENT_MODEL", "deepseek-ai/DeepSeek-V4.1-Flash")
 AGENT_MAX_STEPS = int(os.getenv("AGENT_MAX_STEPS", "6"))
 AGENT_SEARCH_K = int(os.getenv("AGENT_SEARCH_K", "5"))
 AGENT_LOG_DIR = os.getenv("AGENT_LOG_DIR", os.path.join(BACKEND_DIR, "logs"))
