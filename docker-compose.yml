@@ -1,16 +1,49 @@
 services:
-  api:
-    build: ./backend
-    env_file: [backend/.env]
-    volumes:
-      - ./backend/uploads:/app/backend/uploads
-      - ./backend/faiss_index:/app/backend/faiss_index
-      - ./backend/logs:/app/backend/logs
-    restart: unless-stopped
-  web:
-    build: ./frontend
-    ports: ["3000:3000"]
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    # 用 .env 里的真实 Key 覆盖；没有 .env 时容器能起来但上传/问答会返回 503。
+    # required: false 允许 .env 不存在时照常启动（新环境首次拉起、CI 里跑健康检查等场景）。
+    env_file:
+      - path: ./backend/.env
+        required: false
     environment:
-      BACKEND_URL: http://api:8000
-    depends_on: [api]
+      - PORT=8000
+      # 容器内固定用这几个路径，外部通过下面的具名卷持久化
+      - UPLOAD_DIR=/app/backend/uploads
+      - FAISS_DIR=/app/backend/faiss_index
+      - AGENT_LOG_DIR=/app/backend/logs
+    volumes:
+      - backend_uploads:/app/backend/uploads
+      - backend_index:/app/backend/faiss_index
+      - backend_logs:/app/backend/logs
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
     restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    environment:
+      # Next.js 的 Route Handler 在服务端用这个地址转发到后端；
+      # 容器间走 compose 的内部网络，用服务名 backend 即可，不用 localhost
+      - BACKEND_URL=http://backend:8000
+    ports:
+      - "3000:3000"
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  backend_uploads:
+  backend_index:
+  backend_logs:

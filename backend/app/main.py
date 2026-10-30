@@ -185,6 +185,8 @@ def create_app(
             llm_impl,
             max_steps=agent_max_steps,
             log_dir=agent_log_dir,
+            enable_decompose=config.QUERY_DECOMPOSE_ENABLED,
+            enable_rerank=config.RERANK_ENABLED,
         )
         return StreamingResponse(
             stream_events(events, request.is_disconnected),

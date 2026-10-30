@@ -1,10 +1,12 @@
 """工具定义（OpenAI tools 格式）与执行。所有错误都转成 {"error": ...} 交回模型自行修正。"""
 import json
-from typing import Any, Callable, Dict, List
+from typing import Any, Callable, Dict, List, Optional
 
-from app.config import AGENT_SEARCH_K
+from app.config import AGENT_SEARCH_K, RERANK_ENABLED
 from app.document import KnowledgeBase
 from app.agent.evidence import EvidenceRegistry
+from app.agent.llm import AgentLLM
+from app.agent.rerank import rerank
 
 MAX_RESULT_CHARS = 4000
 SNIPPET_CHARS = 600
@@ -121,6 +123,7 @@ def search_kb(
     registry: EvidenceRegistry,
     args: Dict[str, Any],
     default_k: int = AGENT_SEARCH_K,
+    rerank_llm: Optional[AgentLLM] = None,
 ) -> dict:
     query = str(args.get("query", "")).strip()
     if not query:
@@ -133,12 +136,21 @@ def search_kb(
     if doc_id is not None and not isinstance(doc_id, str):
         return {"error": "doc_id 必须是字符串，例如 \"3f2a…\"；不确定时不要传这个参数"}
 
-    hits = kb.search_with_scores(query, k=k, doc_id=doc_id or None)
+    # rerank 需要候选池比目标 k 更大才有重排的意义，多取两倍兜底
+    fetch_k = k * 2 if rerank_llm is not None else k
+    hits = kb.search_with_scores(query, k=fetch_k, doc_id=doc_id or None)
     if not hits:
         return {"items": [], "message": f"没有检索到与「{query}」相关的内容，可以换关键词再试"}
 
-    evidences = registry.register_many([doc for doc, _ in hits])
-    scores = [round(float(score), 4) for _, score in hits]
+    docs = [doc for doc, _ in hits]
+    score_by_key = {_doc_key(doc): score for doc, score in hits}
+
+    if rerank_llm is not None:
+        docs = rerank(rerank_llm, query, docs)
+
+    docs = docs[:k]
+    evidences = registry.register_many(docs)
+    scores = [round(float(score_by_key.get(_doc_key(doc), 0.0)), 4) for doc in docs]
     return {
         "items": [
             {
@@ -149,6 +161,11 @@ def search_kb(
         ],
         "scores": scores,
     }
+
+
+def _doc_key(doc) -> str:
+    meta = doc.metadata or {}
+    return str(meta.get("chunk_id") or f"{meta.get('doc_id')}:{meta.get('chunk_index')}")
 
 
 def read_chunk(kb: KnowledgeBase, registry: EvidenceRegistry, args: Dict[str, Any]) -> dict:
@@ -197,15 +214,21 @@ def execute_tool(
     kb: KnowledgeBase,
     registry: EvidenceRegistry,
     search_k: int = AGENT_SEARCH_K,
+    rerank_llm: Optional[AgentLLM] = None,
 ) -> dict:
-    """执行工具；参数解析 / 校验 / 内部异常都转成 {"error": ...}，不向上抛。"""
+    """执行工具；参数解析 / 校验 / 内部异常都转成 {"error": ...}，不向上抛。
+
+    rerank_llm 只在 RERANK_ENABLED 开启且调用方传入时才会用于 search_kb 的二次排序；
+    传 None（默认）就是原有行为，不影响已有调用方。
+    """
     handler = _HANDLERS.get(name)
     if handler is None:
         return {"error": f"没有名为 {name} 的工具。可用工具：{', '.join(_HANDLERS)}"}
     try:
         args = _parse_args(raw_arguments)
         if name == "search_kb":
-            result = handler(kb, registry, args, default_k=search_k)
+            effective_rerank = rerank_llm if RERANK_ENABLED else None
+            result = handler(kb, registry, args, default_k=search_k, rerank_llm=effective_rerank)
         else:
             result = handler(kb, registry, args)
     except ValueError as e:

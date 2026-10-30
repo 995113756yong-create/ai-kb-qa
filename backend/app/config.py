@@ -39,4 +39,20 @@ RRF_K = int(os.getenv("RRF_K", "60"))
 HYBRID_VECTOR_WEIGHT = float(os.getenv("HYBRID_VECTOR_WEIGHT", "1.0"))
 HYBRID_BM25_WEIGHT = float(os.getenv("HYBRID_BM25_WEIGHT", "3.0"))
 
+# 查询改写：复合问题（如 A和B分别是多少）先拆成子问题各自检索，
+# 避免模型偷懒只检索一次漏掉其中一个对象。
+#
+# 默认关闭：在 21 条评测集上实测，开启前后整体通过率都是 95.2%（同一道用例失败），
+# 没有体现出可衡量的收益，却多花一次 LLM 调用、平均耗时从 9.0s 涨到 25.4s。
+# 原因：当前用的 DeepSeek-V4.1-Flash 工具调用能力本身就强，ReAct 循环已经会
+# 自发分头检索，这一步基本是重复劳动。保留实现与测试，作为可选特性，
+# 换成能力更弱的模型或更复杂的真实问题分布时可以按需打开。
+QUERY_DECOMPOSE_ENABLED = os.getenv("QUERY_DECOMPOSE_ENABLED", "false").lower() == "true"
+
+# Rerank：对检索候选用 LLM 二次打分排序，不引入 cross-encoder 依赖。
+#
+# 默认关闭：同样在现有评测集上未观察到可衡量的提升，原因是混合检索命中率已经
+# 较高、候选数较少时重排空间有限。保留实现与测试，作为可选特性。
+RERANK_ENABLED = os.getenv("RERANK_ENABLED", "false").lower() == "true"
+
 AGENT_LOG_DIR = os.getenv("AGENT_LOG_DIR", os.path.join(BACKEND_DIR, "logs"))

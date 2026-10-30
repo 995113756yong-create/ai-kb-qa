@@ -4,6 +4,7 @@ import type { Source, ToolCallArgs } from "@/lib/types";
 // 前者是渲染用的视图模型，后者是接口契约。
 
 export type Step =
+  | { kind: "decompose"; key: string; queries: string[] }
   | { kind: "thought"; key: string; text: string }
   | { kind: "tool_call"; key: string; name: string; args: ToolCallArgs }
   | { kind: "tool_result"; key: string; name: string; ok: boolean; summary: string };

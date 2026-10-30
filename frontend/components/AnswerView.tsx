@@ -39,7 +39,7 @@ export default function AnswerView({ text, onJump }: Props) {
   }
 
   return (
-    <div className="whitespace-pre-wrap text-sm leading-relaxed text-zinc-800 dark:text-zinc-100">
+    <div className="whitespace-pre-wrap text-[13.5px] leading-7 text-zinc-800 dark:text-zinc-100">
       {splitSegments(text).map((segment, i) =>
         segment.kind === "text" ? (
           <span key={i}>{segment.text}</span>
@@ -48,10 +48,10 @@ export default function AnswerView({ text, onJump }: Props) {
             key={i}
             type="button"
             onClick={(event) => handleClick(event, segment.index)}
-            className="mx-0.5 rounded bg-blue-100 px-1 text-[11px] font-medium text-blue-700 hover:bg-blue-200 dark:bg-blue-900 dark:text-blue-200"
+            className="mx-0.5 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-indigo-100 px-1 text-[10px] font-semibold text-indigo-700 transition-colors hover:bg-indigo-200 dark:bg-indigo-500/20 dark:text-indigo-300 dark:hover:bg-indigo-500/30"
             aria-label={`查看出处 ${segment.index}`}
           >
-            [{segment.index}]
+            {segment.index}
           </button>
         ),
       )}
