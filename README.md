@@ -56,6 +56,8 @@ FastAPI（端口 8000，全部 AI 逻辑在这里）
 - **流式输出**：思考过程、工具调用、回答增量都通过 SSE 实时推送
 - **删除文档**：按文档整体删除片段并清理索引，删空后可从空库重建
 - **安全加固**：上传文件由服务端重命名，限制类型与大小；删除接口校验 ID 格式；转发层拒绝路径穿越
+- **混合检索**：向量 + BM25 关键词检索融合，解决配置号/型号等精确标识符的召回短板（见「混合检索」一节）
+- **问答界面**：品牌色渐变 + 思考中动态指示 + 消息进场动效，深浅色自适应
 
 ## 项目结构
 
@@ -64,13 +66,17 @@ ai-kb-qa/
 ├── backend/
 │   ├── app/
 │   │   ├── config.py           # 环境配置
-│   │   ├── document.py         # 加载、切分、KnowledgeBase（FAISS + docs.json）
+│   │   ├── document.py         # 加载、切分、KnowledgeBase（FAISS + BM25 混合检索）
+│   │   ├── retrieval.py        # BM25 + 向量融合（归一化加权 + max 合并）
 │   │   ├── qa.py               # 固定 RAG 链与 QAService
+│   │   ├── mcp_server.py       # MCP Server（JSON-RPC 2.0 over stdio）
 │   │   ├── main.py             # 应用工厂 create_app + 全部 HTTP 接口
 │   │   └── agent/
 │   │       ├── llm.py          # AgentLLM 协议 + OpenAI 兼容实现
 │   │       ├── tools.py        # 工具定义（JSON Schema）与执行
 │   │       ├── evidence.py     # 证据登记表与引用校验
+│   │       ├── query_rewrite.py # 复合问题拆解（默认关闭）
+│   │       ├── rerank.py       # LLM 二次排序（默认关闭）
 │   │       ├── prompts.py      # 系统提示词与回答提示词
 │   │       ├── runner.py       # ReAct 循环，产出事件流
 │   │       └── sse.py          # 事件 → SSE 文本、心跳、断连检测
@@ -87,14 +93,21 @@ ai-kb-qa/
 │   ├── lib/                    # types / api / sse / chat
 │   ├── __tests__/              # vitest
 │   └── Dockerfile
-├── docker-compose.yml
+├── eval/                       # 评测集：端到端 + 检索层隔离测试
+│   ├── cases.jsonl
+│   ├── retrieval_probes.jsonl
+│   ├── corpus.py
+│   ├── run_eval.py
+│   └── bench_retrieval.py
+├── docker-compose.yml          # 本地构建
+├── docker-compose.prod.yml     # 拉取 GHCR 现成镜像
 ├── .github/workflows/docker-publish.yml
 └── README.md
 ```
 
 ## 本地开发
 
-### 方式一：docker compose（一条命令）
+### 方式一：docker compose（一条命令，推荐演示用）
 
 ```bash
 cp backend/.env.example backend/.env
@@ -104,7 +117,24 @@ docker compose up --build
 # 浏览器访问 http://localhost:3000
 ```
 
-`web` 通过 `BACKEND_URL=http://api:8000` 找到后端；后端的数据目录挂载在本地，重启容器不丢知识库。
+两个服务分别是 `backend`（FastAPI，端口 8000）和 `frontend`（Next.js，端口 3000）。
+`frontend` 通过 `BACKEND_URL=http://backend:8000` 找到后端——容器间走 compose
+内部网络，用服务名而不是 `localhost`。
+
+`frontend` 的启动条件是 `depends_on: backend: condition: service_healthy`，
+会等后端 `/api/health` 探活通过再起前端，避免前端先起来、第一次请求直接 502。
+
+知识库数据（上传文件、FAISS 索引、Agent 运行日志）落在三个具名卷
+（`backend_uploads` / `backend_index` / `backend_logs`），`docker compose down`
+不加 `-v` 不会丢数据；要彻底清空重新演示用 `docker compose down -v`。
+
+不想本地构建镜像、只想用 CI 已经推送的镜像时：
+
+```bash
+docker compose -f docker-compose.prod.yml up -d
+```
+
+参见下方"从 GHCR 拉镜像运行"一节。
 
 ### 方式二：分别启动前后端
 
@@ -140,6 +170,10 @@ npm run dev                     # 访问 http://localhost:3000
 | `AGENT_MAX_STEPS` | `6` | 研究阶段最多调用几轮模型 |
 | `AGENT_SEARCH_K` | `5` | `search_kb` 默认返回的片段数（`run_agent` 调用时会覆盖工具内的默认值） |
 | `AGENT_LOG_DIR` | `backend/logs` | Agent 运行日志目录 |
+| `HYBRID_SEARCH_ENABLED` | `true` | 混合检索（向量 + BM25）开关，见「混合检索」一节 |
+| `HYBRID_VECTOR_WEIGHT` / `HYBRID_BM25_WEIGHT` | `1.0` / `3.0` | 两路融合权重 |
+| `QUERY_DECOMPOSE_ENABLED` | `false` | 复合问题拆解开关，默认关闭，原因见「查询改写与 Rerank」一节 |
+| `RERANK_ENABLED` | `false` | LLM 二次排序开关，默认关闭，原因见同上 |
 | `MAX_UPLOAD_MB` | `10` | 单文件上传上限 |
 | `TOP_K` | `3` | 固定 RAG 的检索片段数 |
 
@@ -281,6 +315,56 @@ npm run dev                     # 访问 http://localhost:3000
 - **失败归因**：带 `error` 字段的行单独统计，区分模型报错、工具异常和超时。
 
 写日志失败只打 warning，不影响响应——日志是旁路，不能成为新的故障点。
+
+## 查询改写与 Rerank
+
+两个可选的 Agent 增强特性，**默认关闭**，但保留完整实现与测试，可通过环境变量打开。
+
+### 查询改写（复合问题拆解）
+
+**问题**：系统提示词写了"涉及多个对象时分别检索"，但这只是建议，模型经常偷懒。
+"产品A和产品B的月费分别是多少"这类问题，模型可能只查了产品A就作答。
+
+**实现**（`app/agent/query_rewrite.py`）：
+1. 启发式预判（`should_attempt_decompose`）：命中"分别/各自"等强信号词，
+   或"并列连词 + 比较类线索词"组合，才判定为"看起来像复合问题"——避免对
+   每个简单问题都多花一次 LLM 调用。
+2. 命中后调用一次 LLM 把问题拆成互相独立的子问题（最多 4 个），每个子问题
+   预先调用 `search_kb` 并把证据登记进 `EvidenceRegistry`，SSE 流里产出
+   `decompose` 事件供前端展示拆解结果。
+3. 任何环节失败（LLM 报错、JSON 解析失败、拆出 0 个子问题）都静默退化为
+   原问题单独处理，不影响主流程。
+
+### Rerank（LLM 二次排序）
+
+**问题**：混合检索解决的是召回（能不能捞回来），不保证 Top-K 的排序精度。
+
+**实现**（`app/agent/rerank.py`）：不引入 cross-encoder 依赖，复用已有的
+Agent 模型做一次打分：把查询和候选片段列出来，让模型给每个片段打 0-10 分，
+按分数重排。候选数 < 2 时跳过（没有排序意义）。任何解析失败都原样返回输入
+顺序，绝不让 rerank 变成故障点。
+
+### 为什么默认关闭
+
+在 21 条端到端评测集上做了 A/B（只翻 `QUERY_DECOMPOSE_ENABLED` / `RERANK_ENABLED`
+两个环境变量，其余完全一致）：
+
+| 配置 | 整体通过率 | 平均耗时 |
+|------|:---:|:---:|
+| 关闭（默认） | 95.2% | 9.0s |
+| 开启 | 95.2% | 25.4s |
+
+两者在当前评测集上**通过率完全一致**（同一条 `m2` 用例失败，原因是关键词判定
+过严，与是否拆解无关），开启后平均耗时却涨了近 3 倍。
+
+**根因**：当前用的 `deepseek-ai/DeepSeek-V4.1-Flash` 工具调用能力本身就强，
+ReAct 循环已经会自发分头检索（多步检索场景见「Agent 设计」第 2 节），这一步
+在小样本评测集上基本是重复劳动，没有体现增量收益。
+
+**什么时候值得打开**：换成工具调用能力更弱的模型、或真实问题分布里复合问题
+占比显著更高、检索候选质量更参差时，这两个特性应该能体现价值——保留实现
+和完整的单元测试（`test_query_rewrite.py` / `test_rerank.py` / 
+`test_runner_enhancements.py`），复测验证即可按需打开。
 
 ## 模型选择
 
@@ -503,6 +587,19 @@ deploy（rollout restart；ai-kb-qa-web 不存在时跳过，不让 job 失败�
 
 - 后端镜像 `ghcr.io/995113756yong-create/ai-kb-qa:latest`，容器端口 8000，需要环境变量 `OPENAI_API_KEY` 和 `AGENT_MODEL`，并给 `/app/backend/uploads`、`/app/backend/faiss_index` 挂载持久卷
 - 前端镜像 `ghcr.io/995113756yong-create/ai-kb-qa-web:latest`，容器端口 3000，开启公网访问，环境变量 `BACKEND_URL=http://ai-kb-qa:8000`（以 Sealos 控制台显示的内网地址为准）
+
+### 从 GHCR 拉镜像运行（不本地构建）
+
+CI 每次合入 main 都会把两个镜像推到 GHCR。不想等本地 `docker build`（前端多阶段构建约 2~3 分钟）时，直接拉现成镜像：
+
+```bash
+cp backend/.env.example backend/.env   # 填入 API Key
+docker compose -f docker-compose.prod.yml pull
+docker compose -f docker-compose.prod.yml up -d
+# 浏览器访问 http://localhost:3000
+```
+
+与 `docker-compose.yml` 的区别只有 `image:` 代替 `build:`，其余网络、健康检查、持久卷的设计完全一样。
 
 ## License
 

@@ -10,6 +10,7 @@ from app.document import KnowledgeBase
 from app.agent.evidence import EvidenceRegistry
 from app.agent.llm import AgentLLM, AssistantTurn
 from app.agent.prompts import ANSWER_PROMPT, SYSTEM_PROMPT
+from app.agent.query_rewrite import decompose_question, should_attempt_decompose
 from app.qa import EMPTY_KB_ANSWER, NOT_FOUND_ANSWER
 from app.agent.tools import TOOL_SCHEMAS, execute_tool, summarize, to_text
 
@@ -80,8 +81,16 @@ def run_agent(
     max_steps: int = AGENT_MAX_STEPS,
     log_dir: Optional[str] = AGENT_LOG_DIR,
     search_k: int = AGENT_SEARCH_K,
+    enable_decompose: bool = False,
+    enable_rerank: bool = False,
+    decompose_llm: Optional[AgentLLM] = None,
+    rerank_llm: Optional[AgentLLM] = None,
 ) -> Iterator[dict]:
-    """产出事件流的同步生成器，由 SSE 层包装成异步响应。"""
+    """产出事件流的同步生成器，由 SSE 层包装成异步响应。
+
+    enable_decompose / enable_rerank 默认关闭，调用方（通常是 main.py 的生产路径）
+    按配置显式打开。decompose_llm / rerank_llm 不传时复用主 llm。
+    """
     started = time.monotonic()
     registry = EvidenceRegistry()
     messages = [
@@ -92,6 +101,7 @@ def run_agent(
     consecutive_errors = 0
     steps: List[dict] = []
     step = 0
+    effective_rerank_llm = (rerank_llm or llm) if enable_rerank else None
 
     def elapsed() -> int:
         return int((time.monotonic() - started) * 1000)
@@ -101,6 +111,45 @@ def run_agent(
         return
 
     try:
+        if enable_decompose and should_attempt_decompose(question):
+            sub_queries = decompose_question(decompose_llm or llm, question)
+            if len(sub_queries) > 1:
+                yield {"type": "decompose", "step": 0, "queries": sub_queries}
+                for i, sub_q in enumerate(sub_queries, start=1):
+                    call_id = f"decomp-{i}"
+                    call_args = json.dumps({"query": sub_q}, ensure_ascii=False)
+                    yield {
+                        "type": "tool_call",
+                        "step": 0,
+                        "id": call_id,
+                        "name": "search_kb",
+                        "args": {"query": sub_q},
+                    }
+                    result = execute_tool(
+                        "search_kb", call_args, kb, registry,
+                        search_k=search_k, rerank_llm=effective_rerank_llm,
+                    )
+                    ok = "error" not in result
+                    yield {
+                        "type": "tool_result",
+                        "step": 0,
+                        "id": call_id,
+                        "name": "search_kb",
+                        "ok": ok,
+                        "summary": summarize(result),
+                    }
+                    steps.append(
+                        {
+                            "step": 0,
+                            "tool": "search_kb",
+                            "args": {"query": sub_q},
+                            "ok": ok,
+                            "summary": summarize(result),
+                        }
+                    )
+                    # 预检索过的查询记入去重表，模型后面原样再查时直接短路，不重复花钱
+                    seen_calls.add(f"search_kb:{canonical_json(call_args)}")
+
         for step in range(1, max_steps + 1):
             yield {"type": "step", "step": step}
             turn = llm.chat(messages, tools=TOOL_SCHEMAS)
@@ -124,7 +173,8 @@ def run_agent(
                 else:
                     seen_calls.add(key)
                     result = execute_tool(
-                        call.name, call.arguments, kb, registry, search_k=search_k
+                        call.name, call.arguments, kb, registry,
+                        search_k=search_k, rerank_llm=effective_rerank_llm,
                     )
 
                 ok = "error" not in result

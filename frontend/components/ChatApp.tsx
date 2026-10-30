@@ -82,6 +82,14 @@ export default function ChatApp() {
         switch (event.type) {
           case "step":
             return message;
+          case "decompose":
+            return {
+              ...message,
+              steps: [
+                ...message.steps,
+                { kind: "decompose", key: `${id}-d`, queries: event.queries },
+              ],
+            };
           case "thought":
             return {
               ...message,
@@ -231,19 +239,24 @@ export default function ChatApp() {
   const noDocs = docs.length === 0;
 
   return (
-    <div className="flex h-full min-h-screen flex-col bg-white dark:bg-zinc-950">
-      <header className="flex items-center gap-3 border-b border-zinc-200 px-4 py-2 dark:border-zinc-800">
+    <div className="flex h-full min-h-screen flex-col bg-zinc-50 dark:bg-zinc-950">
+      <header className="flex items-center gap-3 border-b border-zinc-200/70 bg-white/80 px-4 py-2.5 backdrop-blur-sm dark:border-zinc-800/70 dark:bg-zinc-950/80">
         <button
           type="button"
           onClick={() => setDrawerOpen(true)}
-          className="rounded-md border border-zinc-300 px-2 py-1 text-xs md:hidden dark:border-zinc-700"
+          className="rounded-md border border-zinc-200 px-2 py-1 text-xs text-zinc-600 transition-colors hover:bg-zinc-100 md:hidden dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
         >
           文档
         </button>
-        <h1 className="text-sm font-semibold text-zinc-800 dark:text-zinc-100">
-          AI 知识库问答
-        </h1>
-        <span className="text-xs text-zinc-400">Agent（多步检索）+ 固定 RAG 对照</span>
+        <div className="flex items-center gap-2">
+          <span className="brand-gradient flex h-7 w-7 items-center justify-center rounded-lg text-sm font-semibold text-white shadow-sm">
+            AI
+          </span>
+          <div className="leading-tight">
+            <h1 className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">知识库问答</h1>
+            <p className="text-[11px] text-zinc-400">Agent 多步检索 · 证据引用 · 流式输出</p>
+          </div>
+        </div>
       </header>
 
       <div className="flex min-h-0 flex-1">
@@ -266,7 +279,7 @@ export default function ChatApp() {
         )}
 
         <main className="flex min-h-0 min-w-0 flex-1 flex-col">
-          <div className="flex items-center gap-2 border-b border-zinc-100 px-3 py-1.5 dark:border-zinc-800">
+          <div className="flex items-center gap-2 border-b border-zinc-100 bg-white/60 px-3 py-1.5 dark:border-zinc-800/60 dark:bg-zinc-950/40">
             <label className="text-xs text-zinc-500">模式</label>
             <select
               value={mode}
@@ -274,18 +287,23 @@ export default function ChatApp() {
               disabled={running}
               aria-label="选择问答模式"
               data-testid="mode-select"
-              className="rounded-md border border-zinc-300 bg-white px-2 py-1 text-xs dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-100"
+              className="rounded-md border border-zinc-200 bg-white px-2 py-1 text-xs text-zinc-700 outline-none transition-colors focus:border-indigo-400 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-100"
             >
               <option value="agent">Agent（多步检索）</option>
               <option value="fast">快速问答</option>
             </select>
           </div>
 
-          <div className="min-h-0 flex-1 overflow-y-auto px-3 py-3">
+          <div className="thin-scroll min-h-0 flex-1 overflow-y-auto px-3 py-4">
             {messages.length === 0 ? (
-              <p className="mt-8 text-center text-sm text-zinc-400">
-                {noDocs ? "先上传文档，再开始提问" : "输入问题开始，例如「对比两份文档的结论」"}
-              </p>
+              <div className="mt-16 flex flex-col items-center gap-3 text-center">
+                <span className="brand-gradient flex h-12 w-12 items-center justify-center rounded-2xl text-xl shadow-md">
+                  💬
+                </span>
+                <p className="text-sm text-zinc-400">
+                  {noDocs ? "先上传文档，再开始提问" : "输入问题开始，例如「对比两份文档的结论」"}
+                </p>
+              </div>
             ) : (
               <MessageList messages={messages} onJumpToSource={jumpToSource} />
             )}

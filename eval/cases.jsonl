@@ -35,7 +35,7 @@
 
 {"id": "m1", "category": "multi_hop", "question": "如果团队有10个人，产品A需要额外付多少成员费？", "expect_keywords": ["50", "10"], "expect_sources": ["产品A.txt"], "note": "需要先算出超出5人，再乘10元"}
 {"id": "m2", "category": "multi_hop", "question": "预算50元以内且必须支持单点登录，应该选哪个产品？", "expect_keywords": ["产品 B", "产品B"], "expect_min_sources": 2, "note": "条件筛选，需要同时看多个产品"}
-{"id": "m3", "category": "multi_hop", "question": "产品A的默认推送任务配置号和负责人分别是什么？", "expect_keywords": ["6145", "zhangsan"], "expect_sources": ["推送配置清单.txt"], "note": "跨问题类型组合"}
+{"id": "m3", "category": "multi_hop", "question": "产品A的默认推送任务配置号和负责人分别是什么？", "expect_keywords": ["6145", "zhangsan"], "expect_sources": ["推送配置清单.txt", "产品A.txt"], "note": "跨问题类型组合，两份文档都含该信息，任一命中即可"}
 
 {"id": "r1", "category": "reject", "question": "量子纠缠在生物体内的作用机制是什么？", "expect_answer": "文档中未找到相关信息。", "note": "完全无关"}
 {"id": "r2", "category": "reject", "question": "今天北京的天气怎么样？", "expect_answer": "文档中未找到相关信息。", "note": "实时信息"}

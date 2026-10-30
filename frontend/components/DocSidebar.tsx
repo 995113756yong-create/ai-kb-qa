@@ -14,6 +14,12 @@ type Props = {
   onRefresh: () => Promise<void>;
 };
 
+const EXT_ICON: Record<string, string> = {
+  ".pdf": "📕",
+  ".md": "📝",
+  ".txt": "📄",
+};
+
 function formatSize(size: number): string {
   if (size >= 1024 * 1024) {
     return `${(size / 1024 / 1024).toFixed(1)}MB`;
@@ -94,18 +100,19 @@ export default function DocSidebar({ docs, loading, onRefresh }: Props) {
   );
 
   return (
-    <aside className="flex h-full flex-col gap-3 border-r border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-900">
+    <aside className="flex h-full flex-col gap-3 border-r border-zinc-200/80 bg-white p-4 dark:border-zinc-800/80 dark:bg-zinc-950">
       <div className="flex items-center justify-between">
         <h2 className="text-sm font-semibold text-zinc-800 dark:text-zinc-100">
-          文档（{docs.length}）
+          文档
+          <span className="ml-1 text-xs font-normal text-zinc-400">{docs.length}</span>
         </h2>
         <button
           type="button"
           onClick={handlePick}
           disabled={uploading}
-          className="rounded-md bg-blue-600 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-blue-700 disabled:opacity-50"
+          className="brand-gradient rounded-lg px-3 py-1.5 text-xs font-medium text-white shadow-sm transition-all hover:shadow-md active:scale-95 disabled:opacity-50"
         >
-          {uploading ? "上传中…" : "上传文档"}
+          {uploading ? "上传中…" : "+ 上传"}
         </button>
         <input
           ref={inputRef}
@@ -119,17 +126,20 @@ export default function DocSidebar({ docs, loading, onRefresh }: Props) {
       </div>
 
       {error && (
-        <p role="alert" className="rounded-md bg-red-50 px-2 py-1.5 text-xs text-red-600">
+        <p role="alert" className="rounded-lg bg-red-50 px-2.5 py-1.5 text-xs text-red-600 dark:bg-red-900/20 dark:text-red-300">
           {error}
         </p>
       )}
 
-      <div className="flex-1 overflow-y-auto">
-        {loading && <p className="text-xs text-zinc-500">加载中…</p>}
+      <div className="thin-scroll flex-1 overflow-y-auto">
+        {loading && <p className="text-xs text-zinc-400">加载中…</p>}
 
         {!loading && docs.length === 0 && (
-          <div className="rounded-md border border-dashed border-zinc-300 p-3 text-xs leading-relaxed text-zinc-500 dark:border-zinc-700">
-            还没有文档。先上传 TXT / MD / PDF，再开始提问。
+          <div className="rounded-xl border border-dashed border-zinc-200 p-4 text-center text-xs leading-relaxed text-zinc-400 dark:border-zinc-700">
+            <div className="mb-1 text-2xl">📂</div>
+            还没有文档。
+            <br />
+            先上传 TXT / MD / PDF，再开始提问。
           </div>
         )}
 
@@ -137,13 +147,16 @@ export default function DocSidebar({ docs, loading, onRefresh }: Props) {
           {docs.map((doc) => (
             <li
               key={doc.doc_id}
-              className="group flex items-start gap-2 rounded-md bg-white px-2 py-1.5 text-xs shadow-sm dark:bg-zinc-800"
+              className="group flex items-start gap-2 rounded-xl border border-transparent bg-zinc-50/80 px-2.5 py-2 text-xs transition-colors hover:border-zinc-200 hover:bg-white dark:bg-zinc-900/60 dark:hover:border-zinc-700 dark:hover:bg-zinc-900"
             >
+              <span className="mt-0.5 shrink-0 text-sm" aria-hidden>
+                {EXT_ICON[doc.ext] ?? "📄"}
+              </span>
               <div className="min-w-0 flex-1">
                 <p className="truncate font-medium text-zinc-800 dark:text-zinc-100" title={doc.filename}>
                   {doc.filename}
                 </p>
-                <p className="mt-0.5 text-[11px] text-zinc-500">
+                <p className="mt-0.5 text-[11px] text-zinc-400">
                   {doc.chunks} 片段 · {formatSize(doc.size)} · {formatTime(doc.uploaded_at)}
                 </p>
               </div>

@@ -1,0 +1,40 @@
+services:
+  backend:
+    image: ghcr.io/995113756yong-create/ai-kb-qa:latest
+    env_file:
+      - path: ./backend/.env
+        required: false
+    environment:
+      - PORT=8000
+      - UPLOAD_DIR=/app/backend/uploads
+      - FAISS_DIR=/app/backend/faiss_index
+      - AGENT_LOG_DIR=/app/backend/logs
+    volumes:
+      - backend_uploads:/app/backend/uploads
+      - backend_index:/app/backend/faiss_index
+      - backend_logs:/app/backend/logs
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+
+  frontend:
+    image: ghcr.io/995113756yong-create/ai-kb-qa-web:latest
+    environment:
+      - BACKEND_URL=http://backend:8000
+    ports:
+      - "3000:3000"
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  backend_uploads:
+  backend_index:
+  backend_logs:
