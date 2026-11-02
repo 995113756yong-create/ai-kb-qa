@@ -13,6 +13,9 @@ vi.mock("@/lib/api", () => ({
   deleteDoc: vi.fn(),
   ask: vi.fn(),
   streamAgent: vi.fn(),
+  listAgents: vi.fn(),
+  createAgent: vi.fn(),
+  deleteAgent: vi.fn(),
   ApiError: class ApiError extends Error {
     status: number;
     constructor(status: number, message: string) {
@@ -35,6 +38,22 @@ const DOC: DocInfo = {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mocked.listAgents.mockResolvedValue({
+    status: "ok",
+    agents: [
+      {
+        agent_id: "default",
+        name: "通用助手",
+        description: "",
+        persona: "",
+        greeting: "",
+        emoji: "🤖",
+        model: "",
+        created_at: "",
+        builtin: true,
+      },
+    ],
+  });
   mocked.listDocs.mockResolvedValue({ status: "ok", docs: [DOC] });
 });
 

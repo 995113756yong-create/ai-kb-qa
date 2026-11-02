@@ -24,3 +24,10 @@ export type ChatMessage =
       error: string | null;
       elapsedMs: number | null;
     };
+
+// 一次对话 = 一个专家 + 一组消息。切换专家清空消息，旧会话不保留：
+// 知识库按专家隔离，跨专家保留消息会让引用指向另一个库的文档，反而误导。
+export type Conversation = {
+  agentId: string;
+  messages: ChatMessage[];
+};

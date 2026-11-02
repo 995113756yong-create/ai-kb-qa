@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { ApiError, ask, deleteDoc, listDocs, uploadDoc } from "@/lib/api";
+import { ApiError, ask, deleteAgent, deleteDoc, listDocs, uploadDoc } from "@/lib/api";
 
 function mockFetch(status: number, body: unknown) {
   const spy = vi.fn().mockResolvedValue({
@@ -86,6 +86,44 @@ describe("请求构造", () => {
 
     const [url, init] = spy.mock.calls[0] as [string, RequestInit];
     expect(url).toBe("/api/docs/a%20b");
+    expect(init.method).toBe("DELETE");
+  });
+});
+
+describe("agent_id 参数路由", () => {
+  it("default 专家走无参数旧路径", async () => {
+    const spy = mockFetch(200, { status: "ok", docs: [] });
+
+    await listDocs("default");
+
+    expect(spy.mock.calls[0][0]).toBe("/api/docs");
+  });
+
+  it("自定义专家带 ?agent_id=", async () => {
+    const spy = mockFetch(200, { status: "ok", docs: [] });
+
+    await listDocs("fitness-coach");
+
+    expect(spy.mock.calls[0][0]).toBe("/api/docs?agent_id=fitness-coach");
+  });
+
+  it("uploadDoc 透传 agent_id", async () => {
+    const spy = mockFetch(200, { status: "ok", doc_id: "d", filename: "a.txt", size: 3, chunks: 1, message: "" });
+    const file = new File(["abc"], "a.txt", { type: "text/plain" });
+
+    await uploadDoc(file, "cooking");
+
+    const [url] = spy.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("/api/upload?agent_id=cooking");
+  });
+
+  it("deleteAgent 走 /api/agents/{id}", async () => {
+    const spy = mockFetch(200, { status: "ok", agent_id: "cooking", filename: "" });
+
+    await deleteAgent("cooking");
+
+    const [url, init] = spy.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("/api/agents/cooking");
     expect(init.method).toBe("DELETE");
   });
 });

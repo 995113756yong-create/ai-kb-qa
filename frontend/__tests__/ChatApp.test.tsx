@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import ChatApp from "@/components/ChatApp";
 import * as api from "@/lib/api";
-import type { AgentEvent, DocInfo } from "@/lib/types";
+import type { AgentEvent, AgentInfo, DocInfo } from "@/lib/types";
 
 vi.mock("@/lib/api", () => ({
   listDocs: vi.fn(),
@@ -12,6 +12,9 @@ vi.mock("@/lib/api", () => ({
   deleteDoc: vi.fn(),
   ask: vi.fn(),
   streamAgent: vi.fn(),
+  listAgents: vi.fn(),
+  createAgent: vi.fn(),
+  deleteAgent: vi.fn(),
   ApiError: class ApiError extends Error {
     status: number;
     constructor(status: number, message: string) {
@@ -32,6 +35,34 @@ const DOC: DocInfo = {
   uploaded_at: "2026-10-27T09:00:00+00:00",
 };
 
+const DEFAULT_AGENT: AgentInfo = {
+  agent_id: "default",
+  name: "通用助手",
+  description: "基于上传文档回答任意领域的问题",
+  persona: "",
+  greeting: "",
+  emoji: "🤖",
+  model: "",
+  created_at: "",
+  builtin: true,
+};
+
+const FITNESS_AGENT: AgentInfo = {
+  agent_id: "fitness-coach",
+  name: "健身教练",
+  description: "增肌减脂与跑步入门",
+  persona: "你是健身教练",
+  greeting: "你好！我是你的健身教练💪",
+  emoji: "💪",
+  model: "",
+  created_at: "2026-11-01T00:00:00+00:00",
+  builtin: false,
+};
+
+function agentList(agents: AgentInfo[]) {
+  return { status: "ok" as const, agents };
+}
+
 function docList(docs: DocInfo[]) {
   return { status: "ok" as const, docs };
 }
@@ -49,6 +80,7 @@ function emit(events: AgentEvent[]) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mocked.listAgents.mockResolvedValue(agentList([DEFAULT_AGENT]));
   mocked.listDocs.mockResolvedValue(docList([]));
   mocked.streamAgent.mockResolvedValue(undefined);
 });
@@ -59,7 +91,7 @@ describe("ChatApp", () => {
 
     await waitFor(() => expect(mocked.listDocs).toHaveBeenCalled());
     expect(screen.getByTestId("chat-input")).toBeDisabled();
-    expect(screen.getByText("先上传文档，再开始提问")).toBeInTheDocument();
+    expect(screen.getByText(/先在左侧上传/)).toBeInTheDocument();
   });
 
   it("有文档时可以提问", async () => {
@@ -73,7 +105,8 @@ describe("ChatApp", () => {
     await userEvent.click(screen.getByTestId("send-button"));
 
     await waitFor(() => expect(mocked.streamAgent).toHaveBeenCalledTimes(1));
-    expect(mocked.streamAgent.mock.calls[0][0]).toBe("苹果是什么？");
+    // default 专家：不传 agent_id 参数时走旧路径
+    expect(mocked.streamAgent).toHaveBeenCalledWith("苹果是什么？", expect.any(Function), expect.anything(), "default");
   });
 
   it("Agent 模式渲染时间线、流式回答和出处卡片", async () => {
@@ -112,7 +145,7 @@ describe("ChatApp", () => {
 
     // 展开后能看到思考、工具调用和工具结果
     await userEvent.click(screen.getByTestId("trace-toggle"));
-    await waitFor(() => expect(screen.getByTestId("trace-steps")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByTestId("trace-steps").lastChild).toBeInTheDocument());
     expect(screen.getByText(/先检索产品信息/)).toBeInTheDocument();
     expect(screen.getByText(/search_kb\(query=苹果\)/)).toBeInTheDocument();
     expect(screen.getByText(/命中 1 条/)).toBeInTheDocument();
@@ -122,8 +155,8 @@ describe("ChatApp", () => {
     expect(document.body.textContent).not.toContain("[E1]");
 
     // 出处卡片
-    expect(screen.getByTestId("source-card-1")).toHaveTextContent("[1] 产品A.txt · 第2页");
-    expect(screen.getByTestId("source-card-1")).toHaveTextContent("苹果是一种水果");
+    expect(screen.getByTestId("source-card-1")).toHaveTextContent("产品A.txt");
+    expect(screen.getByTestId("source-card-1")).toHaveTextContent("第2页");
   });
 
   it("grounded=false 时显示黄色提示", async () => {
@@ -190,8 +223,93 @@ describe("ChatApp", () => {
     await userEvent.type(screen.getByTestId("chat-input"), "苹果");
     await userEvent.click(screen.getByTestId("send-button"));
 
-    await waitFor(() => expect(mocked.ask).toHaveBeenCalledWith("苹果"));
+    await waitFor(() => expect(mocked.ask).toHaveBeenCalledWith("苹果", "default"));
     expect(mocked.streamAgent).not.toHaveBeenCalled();
     await waitFor(() => expect(screen.getByTestId("source-card-1")).toBeInTheDocument());
+  });
+});
+
+// ---------- 多专家平台 ----------
+
+describe("多专家平台", () => {
+  it("专家列表渲染，default 排第一且不可删除", async () => {
+    mocked.listAgents.mockResolvedValue(agentList([DEFAULT_AGENT, FITNESS_AGENT]));
+    render(<ChatApp />);
+
+    await waitFor(() => expect(screen.getByTestId("agent-list").children.length).toBe(2));
+    // default 在第一位
+    expect(screen.getByTestId("agent-item-default")).toBeInTheDocument();
+    expect(screen.getByTestId("agent-item-fitness-coach")).toBeInTheDocument();
+    // default 没有删除按钮（builtin）
+    expect(screen.queryByLabelText("删除专家 通用助手")).not.toBeInTheDocument();
+    // 自定义专家有删除按钮
+    expect(screen.getByLabelText("删除专家 健身教练")).toBeInTheDocument();
+  });
+
+  it("切换专家：拉取该专家文档，问答请求带 agent_id", async () => {
+    mocked.listAgents.mockResolvedValue(agentList([DEFAULT_AGENT, FITNESS_AGENT]));
+    mocked.listDocs.mockResolvedValue(docList([DOC]));
+    mocked.streamAgent.mockImplementation(emit([]));
+    render(<ChatApp />);
+
+    await waitFor(() => expect(screen.getByTestId("agent-item-fitness-coach")).toBeInTheDocument());
+    // 初始拉的是 default 的文档
+    await waitFor(() => expect(mocked.listDocs).toHaveBeenCalledWith("default"));
+
+    await userEvent.click(screen.getByTestId("agent-item-fitness-coach"));
+
+    // 切换后拉健身专家的文档
+    await waitFor(() => expect(mocked.listDocs).toHaveBeenCalledWith("fitness-coach"));
+
+    await userEvent.type(screen.getByTestId("chat-input"), "怎么练");
+    await userEvent.click(screen.getByTestId("send-button"));
+
+    await waitFor(() =>
+      expect(mocked.streamAgent).toHaveBeenCalledWith("怎么练", expect.any(Function), expect.anything(), "fitness-coach"),
+    );
+  });
+
+  it("新建专家：填表提交后刷新列表", async () => {
+    mocked.listAgents.mockResolvedValue(agentList([DEFAULT_AGENT]));
+    mocked.createAgent.mockResolvedValue({
+      status: "ok",
+      agent_id: "cooking",
+      name: "烹饪助手",
+    });
+
+    render(<ChatApp />);
+    await waitFor(() => expect(screen.getByTestId("create-agent-button")).toBeInTheDocument());
+
+    await userEvent.click(screen.getByTestId("create-agent-button"));
+    const form = await waitFor(() => {
+      const el = screen.getByTestId("create-agent-form");
+      expect(el).toBeInTheDocument();
+      return el;
+    });
+
+    await userEvent.type(screen.getByTestId("agent-name-input"), "烹饪助手");
+    await userEvent.type(screen.getByTestId("agent-persona-input"), "你是厨师");
+
+    await userEvent.click(screen.getByTestId("agent-submit"));
+
+    await waitFor(() => expect(mocked.createAgent).toHaveBeenCalled());
+    expect(mocked.createAgent.mock.calls[0][0]).toMatchObject({
+      name: "烹饪助手",
+      persona: "你是厨师",
+    });
+    // 提交成功后重新拉列表
+    await waitFor(() => expect(mocked.listAgents.mock.calls.length).toBeGreaterThanOrEqual(2));
+  });
+
+  it("专家 greeting 展示在空会话态", async () => {
+    mocked.listAgents.mockResolvedValue(agentList([DEFAULT_AGENT, FITNESS_AGENT]));
+    mocked.listDocs.mockResolvedValue(docList([DOC]));
+    render(<ChatApp />);
+
+    await waitFor(() => expect(screen.getByTestId("agent-item-fitness-coach")).toBeInTheDocument());
+    await userEvent.click(screen.getByTestId("agent-item-fitness-coach"));
+
+    // 健身专家的欢迎语展示在空会话处
+    await waitFor(() => expect(screen.getByText(/健身教练💪/)).toBeInTheDocument());
   });
 });

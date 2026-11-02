@@ -55,4 +55,8 @@ QUERY_DECOMPOSE_ENABLED = os.getenv("QUERY_DECOMPOSE_ENABLED", "false").lower() 
 # 较高、候选数较少时重排空间有限。保留实现与测试，作为可选特性。
 RERANK_ENABLED = os.getenv("RERANK_ENABLED", "false").lower() == "true"
 
-AGENT_LOG_DIR = os.getenv("AGENT_LOG_DIR", os.path.join(BACKEND_DIR, "logs"))
+# 多专家存储根目录：每个自定义专家一个子目录（uploads/faiss_index/logs）。
+# default 专家不进来，沿用上面的 UPLOAD_DIR / FAISS_DIR / AGENT_LOG_DIR。
+AGENTS_DIR = os.getenv("AGENTS_DIR", os.path.join(BACKEND_DIR, "agents_store"))
+
+AGENT_LOG_DIR = os.getenvAGENT_LOG_DIR = os.getenv("AGENT_LOG_DIR", os.path.join(BACKEND_DIR, "logs"))
