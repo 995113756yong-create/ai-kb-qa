@@ -25,7 +25,9 @@ logger = logging.getLogger(__name__)
 AGENTS_FILE = "agents.json"
 MANIFEST_VERSION = 1
 AGENT_ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,31}$")
+MODEL_RE = re.compile(r"^[\w./:-]{1,100}$")
 DEFAULT_AGENT_ID = "default"
+VALID_ANSWER_MODES = ("strict", "reference")
 
 # 内置默认专家：不落盘（agents.json 里不存它），永远存在
 DEFAULT_AGENT = {
@@ -131,10 +133,14 @@ class AgentStore:
         return dict(entry) if entry else None
 
     def list_agents(self) -> List[dict]:
-        """default 永远排第一，其余按创建顺序。"""
+        """default 永远排第一，其余按创建顺序。answer_mode 统一补全供前端显示。"""
         with self._lock:
             others = [dict(e) for e in self._agents.values() if e.get("agent_id") != DEFAULT_AGENT_ID]
-        return [self.get(DEFAULT_AGENT_ID)] + others
+        head = self.get(DEFAULT_AGENT_ID)
+        head["answer_mode"] = effective_mode(head)
+        for e in others:
+            e.setdefault("answer_mode", "reference")
+        return [head] + others
 
     def create(
         self,
@@ -145,12 +151,19 @@ class AgentStore:
         emoji: str = "",
         model: str = "",
         agent_id: Optional[str] = None,
+        answer_mode: str = "reference",
     ) -> dict:
         name = (name or "").strip()
         if not name:
             raise ValueError("专家名称不能为空")
         if len(name) > MAX_NAME_LEN:
             raise ValueError(f"专家名称不能超过 {MAX_NAME_LEN} 字")
+        model = (model or "").strip()
+        if model and not MODEL_RE.fullmatch(model):
+            raise ValueError("模型名不合法")
+        answer_mode = (answer_mode or "reference").strip()
+        if answer_mode not in VALID_ANSWER_MODES:
+            raise ValueError(f"answer_mode 必须是 {VALID_ANSWER_MODES} 之一")
 
         if agent_id is None:
             agent_id = uuid.uuid4().hex[:8]
@@ -169,7 +182,8 @@ class AgentStore:
             "persona": (persona or "").strip(),
             "greeting": (greeting or "").strip(),
             "emoji": (emoji or "").strip(),
-            "model": (model or "").strip(),
+            "model": model,
+            "answer_mode": answer_mode,
             "created_at": now_iso(),
             "builtin": False,
         }
@@ -213,3 +227,19 @@ class AgentStore:
             # 并发时可能别的线程已建好，沿用先建的那个
             existing = self._kbs.setdefault(agent_id, kb)
         return existing
+
+
+def effective_mode(entry: dict) -> str:
+    """专家的有效回答模式。
+
+    default 专家 -> DEFAULT_AGENT_ANSWER_MODE（strict）；
+    其他专家 -> entry.get("answer_mode") or "reference"
+    （旧 agents.json 记录没有该字段，按 reference 处理，线上行为不变）。
+    """
+    from app import config
+
+    if not entry or entry.get("agent_id") == DEFAULT_AGENT_ID:
+        mode = config.DEFAULT_AGENT_ANSWER_MODE
+        return mode if mode in VALID_ANSWER_MODES else "strict"
+    mode = entry.get("answer_mode")
+    return mode if mode in VALID_ANSWER_MODES else "reference"

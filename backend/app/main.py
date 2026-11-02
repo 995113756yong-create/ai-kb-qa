@@ -5,22 +5,25 @@ import uuid
 from contextlib import asynccontextmanager
 from typing import Optional
 
-from fastapi import FastAPI, File, HTTPException, Request, UploadFile
+from fastapi import Depends, FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from langchain_core.embeddings import Embeddings
 from langchain_core.language_models import BaseChatModel
 from pydantic import BaseModel, Field
+from typing import Callable, Literal, Optional as Opt
 
 from app import config
 from app.agent.llm import AgentLLM, OpenAICompatibleLLM
+from app.agent.prompts import VALID_MODES
 from app.agent.runner import run_agent
 from app.agent.sse import SSE_HEADERS, stream_events
-from app.agent_store import AgentStore, DEFAULT_AGENT_ID
+from app.agent_store import AgentStore, DEFAULT_AGENT_ID, effective_mode
 from app.document import KnowledgeBase, get_embeddings, load_and_split
-from app.qa import QAService, get_llm
+from app.qa import NOT_FOUND_ANSWER, QAService, get_llm
 from app.seed_agents import ensure_seed_agents
+from app.security import RateLimiter, client_key, require_admin
 
 READ_BLOCK = 1024 * 1024
 DOC_ID_RE = re.compile(r"^[0-9a-f]{32}$")
@@ -37,6 +40,8 @@ class AskRequest(BaseModel):
 class AgentRequest(BaseModel):
     question: str = Field(..., min_length=1, max_length=1000)
     agent_id: str = Field(DEFAULT_AGENT_ID, max_length=32)
+    # 请求级模式覆盖（评测用）：传了就覆盖专家配置
+    answer_mode: Opt[Literal["strict", "reference"]] = None
 
 
 class AgentCreateRequest(BaseModel):
@@ -48,6 +53,7 @@ class AgentCreateRequest(BaseModel):
     emoji: str = Field("", max_length=8)
     model: str = Field("", max_length=100)
     agent_id: str = Field("", max_length=32)
+    answer_mode: Literal["strict", "reference"] = "reference"
 
 
 def _safe_display_name(filename: Optional[str]) -> str:
@@ -67,6 +73,7 @@ def create_app(
     agent_log_dir: Optional[str] = config.AGENT_LOG_DIR,
     agents_dir: Optional[str] = None,
     seed_builtin: bool = True,
+    agent_llm_factory: Opt[Callable[[str], AgentLLM]] = None,
 ) -> FastAPI:
     """应用工厂：生产环境用默认参数；测试时注入假的 embeddings / llm 和临时目录。
 
@@ -112,6 +119,8 @@ def create_app(
                     ensure_seed_agents(store)
                 except Exception as e:  # 播种失败绝不阻塞启动
                     logger.warning("内置专家播种失败：%s", e)
+        if not config.ADMIN_TOKEN:
+            logger.warning("未设置 ADMIN_TOKEN，写接口对所有人开放")
         yield
 
     app = FastAPI(title="AI KB QA System", lifespan=lifespan)
@@ -122,6 +131,26 @@ def create_app(
         allow_headers=["*"],
     )
     max_bytes = max_upload_mb * 1024 * 1024
+    limiter = RateLimiter(per_minute=config.RATE_LIMIT_PER_MIN)
+
+    # B3：按专家配置的模型名创建 LLM 实例，带缓存。
+    # 测试注入了 agent_llm 而没有 factory 时直接复用注入实例（旧测试不受影响）。
+    _llm_cache: dict = {}
+    _llm_lock = __import__("threading").Lock()
+
+    def _llm_for(model: str) -> AgentLLM:
+        base = getattr(app.state, "agent_llm", None)
+        if not model:
+            return base
+        if agent_llm_factory is None:
+            return base
+        key = model.strip()
+        with _llm_lock:
+            if key in _llm_cache:
+                return _llm_cache[key]
+        instance = agent_llm_factory(key)
+        with _llm_lock:
+            return _llm_cache.setdefault(key, instance)
 
     def _require(request: Request, name: str):
         service = getattr(request.app.state, name, None)
@@ -177,7 +206,7 @@ def create_app(
         return {"status": "ok", "agents": store.list_agents()}
 
     @app.post("/api/agents")
-    def create_agent(req: AgentCreateRequest, request: Request):
+    def create_agent(req: AgentCreateRequest, request: Request, _: None = Depends(require_admin)):
         if getattr(request.app.state, "store", None) is None:
             raise HTTPException(status_code=503, detail=MISSING_KEY_MSG)
         try:
@@ -189,13 +218,14 @@ def create_app(
                 emoji=req.emoji,
                 model=req.model,
                 agent_id=req.agent_id or None,
+                answer_mode=req.answer_mode,
             )
         except ValueError as e:
             raise HTTPException(status_code=422, detail=str(e))
         return {"status": "ok", **entry}
 
     @app.delete("/api/agents/{agent_id}")
-    def delete_agent(agent_id: str, request: Request):
+    def delete_agent(agent_id: str, request: Request, _: None = Depends(require_admin)):
         store = getattr(request.app.state, "store", None)
         if store is None:
             raise HTTPException(status_code=503, detail=MISSING_KEY_MSG)
@@ -205,7 +235,12 @@ def create_app(
         return {"status": "ok", **removed}
 
     @app.post("/api/upload")
-    async def upload_file(request: Request, file: UploadFile = File(...), agent_id: str = DEFAULT_AGENT_ID):
+    async def upload_file(
+        request: Request,
+        file: UploadFile = File(...),
+        agent_id: str = DEFAULT_AGENT_ID,
+        _: None = Depends(require_admin),
+    ):
         kb = _agent_kb(request, agent_id)
         display_name = _safe_display_name(file.filename)
         ext = os.path.splitext(display_name)[1].lower()
@@ -252,7 +287,12 @@ def create_app(
         }
 
     @app.delete("/api/docs/{doc_id}")
-    def delete_doc(doc_id: str, request: Request, agent_id: str = DEFAULT_AGENT_ID):
+    def delete_doc(
+        doc_id: str,
+        request: Request,
+        agent_id: str = DEFAULT_AGENT_ID,
+        _: None = Depends(require_admin),
+    ):
         kb = _agent_kb(request, agent_id)
         if not DOC_ID_RE.fullmatch(doc_id):
             raise HTTPException(status_code=400, detail="doc_id 格式不合法")
@@ -267,6 +307,7 @@ def create_app(
 
     @app.post("/api/ask")
     def ask_question(req: AskRequest, request: Request):
+        limiter.check(client_key(request))
         if req.agent_id == DEFAULT_AGENT_ID:
             qa = _require(request, "qa")
         else:
@@ -284,26 +325,39 @@ def create_app(
 
     @app.post("/api/agent/stream")
     async def agent_stream(req: AgentRequest, request: Request, agent_id: str = ""):
+        limiter.check(client_key(request))
         # agent_id 双通道兜底: 查询串优先, body 兜底.
         # 前端曾把 agent_id 只放查询串导致检索串库; Pydantic 的 body 默认值
         # ("default") 是 truthy, 不能用 or 短路合并, 查询串有值必须优先.
         effective_agent_id = (agent_id or "").strip() or req.agent_id or DEFAULT_AGENT_ID
         kb = _agent_kb(request, effective_agent_id)
-        llm_impl = _require(request, "agent_llm")
         question = req.question.strip()
         if not question:
             raise HTTPException(status_code=422, detail="问题不能为空")
 
-        # 专家人设：拼进 system prompt 改变回答风格；检索与引用校验不变。
-        # default 专家无人设（空串），行为与旧版完全一致。
+        # 专家配置：persona / model / 回答模式 / 日志目录
         persona = ""
+        model = ""
+        mode: str = config.DEFAULT_AGENT_ANSWER_MODE
         log_dir = agent_log_dir
         store = getattr(request.app.state, "store", None)
-        if store is not None and effective_agent_id != DEFAULT_AGENT_ID:
+        if store is not None:
             entry = store.get(effective_agent_id)
             if entry:
                 persona = entry.get("persona") or ""
-                log_dir = store.log_dir_of(req.agent_id)
+                model = entry.get("model") or ""
+                mode = effective_mode(entry)
+                if effective_agent_id != DEFAULT_AGENT_ID:
+                    log_dir = store.log_dir_of(effective_agent_id)  # B2: 用 effective id
+
+        # 请求级模式覆盖（评测用）
+        if req.answer_mode in VALID_MODES:
+            mode = req.answer_mode
+
+        # B3: 专家配置了模型时用独立实例（带缓存），否则用默认实例
+        llm_impl = _llm_for(model) if model else _require(request, "agent_llm")
+        if llm_impl is None:
+            raise HTTPException(status_code=503, detail=MISSING_KEY_MSG)
 
         # run_agent 是同步生成器，交给 sse 层在后台线程里逐条取，避免阻塞事件循环
         events = run_agent(
@@ -316,6 +370,7 @@ def create_app(
             enable_rerank=config.RERANK_ENABLED,
             persona=persona,
             agent_id=effective_agent_id,
+            answer_mode=mode,
         )
         return StreamingResponse(
             stream_events(events, request.is_disconnected),

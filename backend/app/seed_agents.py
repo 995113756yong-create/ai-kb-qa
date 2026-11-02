@@ -206,6 +206,7 @@ def ensure_seed_agents(store) -> List[str]:
                 greeting=FITNESS_GREETING,
                 emoji="💪",
                 agent_id=FITNESS_AGENT_ID,
+                answer_mode="reference",
             )
             created.append(FITNESS_AGENT_ID)
             logger.info("已播种内置专家：%s", FITNESS_AGENT_ID)
