@@ -183,6 +183,9 @@ export default function ChatApp() {
               grounded: event.grounded,
               elapsedMs: event.elapsed_ms,
               running: false,
+              segments: event.segments ?? null,
+              groundedRatio: event.grounded_ratio ?? null,
+              answerMode: event.mode ?? null,
             };
           case "error":
             return { ...message, error: event.detail, running: false };
@@ -210,6 +213,9 @@ export default function ChatApp() {
         stopped: false,
         error: null,
         elapsedMs: null,
+        segments: null,
+        groundedRatio: null,
+        answerMode: null,
       };
 
       setMessages((prev) => [...prev, userMessage, assistantMessage]);

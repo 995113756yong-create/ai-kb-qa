@@ -63,6 +63,8 @@ export default function DocSidebar({
   const [description, setDescription] = useState("");
   const [persona, setPersona] = useState("");
   const [emoji, setEmoji] = useState("");
+  const [model, setModel] = useState("");
+  const [answerMode, setAnswerMode] = useState<"strict" | "reference">("reference");
 
   const activeAgent = agents.find((a) => a.agent_id === activeAgentId);
 
@@ -158,12 +160,16 @@ export default function DocSidebar({
           description: description.trim(),
           persona: persona.trim(),
           emoji: emoji.trim(),
+          model: model.trim(),
+          answer_mode: answerMode,
         });
         setShowCreate(false);
         setName("");
         setDescription("");
         setPersona("");
         setEmoji("");
+        setModel("");
+        setAnswerMode("reference");
         await onRefreshAgents();
       } catch (e) {
         setError(e instanceof ApiError ? e.message : "创建失败，请重试");
@@ -171,7 +177,7 @@ export default function DocSidebar({
         setCreating(false);
       }
     },
-    [description, emoji, name, onRefreshAgents, persona],
+    [answerMode, description, emoji, model, name, onRefreshAgents, persona],
   );
 
   return (
@@ -274,6 +280,38 @@ export default function DocSidebar({
             data-testid="agent-persona-input"
             className="resize-y rounded-lg border border-zinc-200 bg-white px-2.5 py-1.5 text-xs outline-none focus:border-indigo-400 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-100"
           />
+          <input
+            value={model}
+            onChange={(e) => setModel(e.target.value)}
+            placeholder="模型名（可选，留空用默认模型）"
+            aria-label="专家模型"
+            className="rounded-lg border border-zinc-200 bg-white px-2.5 py-1.5 text-xs outline-none focus:border-indigo-400 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-100"
+          />
+          <fieldset className="flex flex-col gap-1" data-testid="answer-mode-fieldset">
+            <legend className="text-[11px] text-zinc-500">回答模式</legend>
+            <label className="flex cursor-pointer items-center gap-1.5 text-xs text-zinc-700 dark:text-zinc-300">
+              <input
+                type="radio"
+                name="answer-mode"
+                value="reference"
+                checked={answerMode === "reference"}
+                onChange={() => setAnswerMode("reference")}
+                data-testid="mode-reference"
+              />
+              参考模式：知识库优先，可用一般知识补充（标注来源）
+            </label>
+            <label className="flex cursor-pointer items-center gap-1.5 text-xs text-zinc-700 dark:text-zinc-300">
+              <input
+                type="radio"
+                name="answer-mode"
+                value="strict"
+                checked={answerMode === "strict"}
+                onChange={() => setAnswerMode("strict")}
+                data-testid="mode-strict"
+              />
+              严格模式：只答知识库，没有依据就拒答
+            </label>
+          </fieldset>
           <div className="flex gap-2">
             <button
               type="submit"

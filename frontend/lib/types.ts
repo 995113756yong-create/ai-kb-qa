@@ -35,6 +35,22 @@ export type Source = {
   source: string | null;
   page: number | null;
   snippet: string;
+  /** 片段全文：数字一致性检查与 judge 都需要 */
+  content?: string;
+};
+
+/** 句子级溯源：一段原文 + 程序标注的来源类型 */
+export type Segment = {
+  text: string;
+  kind: "kb" | "general" | "neutral";
+  citations: number[];
+  warnings: string[];
+};
+
+export type UsageInfo = {
+  prompt_tokens: number;
+  completion_tokens: number;
+  llm_calls: number;
 };
 
 export type AskResponse = {
@@ -54,6 +70,7 @@ export type AgentInfo = {
   greeting: string;
   emoji: string;
   model: string;
+  answer_mode?: "strict" | "reference";
   created_at: string;
   builtin: boolean;
 };
@@ -69,6 +86,8 @@ export type AgentCreateRequest = {
   persona?: string;
   greeting?: string;
   emoji?: string;
+  model?: string;
+  answer_mode?: "strict" | "reference";
   agent_id?: string;
 };
 
@@ -101,6 +120,10 @@ type FinalEvent = {
   steps: number;
   elapsed_ms: number;
   agent_id?: string;
+  mode?: "strict" | "reference";
+  grounded_ratio?: number | null;
+  segments?: Segment[];
+  usage?: UsageInfo;
 };
 type ErrorEvent = { type: "error"; detail: string };
 

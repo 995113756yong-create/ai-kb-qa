@@ -7,9 +7,18 @@ from typing import Iterator, List, Optional
 
 from app.config import AGENT_LOG_DIR, AGENT_MAX_STEPS, AGENT_SEARCH_K
 from app.document import KnowledgeBase
+from app.agent.attribution import Attribution, attribute
 from app.agent.evidence import EvidenceRegistry
-from app.agent.llm import AgentLLM, AssistantTurn
-from app.agent.prompts import ANSWER_PROMPT, NO_EVIDENCE_ANSWER_PROMPT, SYSTEM_PROMPT
+from app.agent.llm import AgentLLM, AssistantTurn, Usage
+from app.agent.prompts import (
+    NO_EVIDENCE_ANSWER_PROMPT,
+    RESEARCH_PROMPT_REFERENCE,
+    RESEARCH_PROMPT_STRICT,
+    REFERENCE_ANSWER_PROMPT,
+    STRICT_ANSWER_PROMPT,
+    VALID_MODES,
+    with_persona,
+)
 from app.agent.query_rewrite import decompose_question, should_attempt_decompose
 from app.qa import EMPTY_KB_ANSWER, NOT_FOUND_ANSWER
 from app.agent.tools import TOOL_SCHEMAS, execute_tool, summarize, to_text
@@ -20,6 +29,57 @@ LOG_FILE = "agent_runs.jsonl"
 MAX_CONSECUTIVE_ERRORS = 3
 
 
+class _UsageMeter:
+    """累加一次 run_agent 全程的 token 用量与调用次数。"""
+
+    def __init__(self) -> None:
+        self.prompt_tokens = 0
+        self.completion_tokens = 0
+        self.llm_calls = 0
+        self.usage: Optional[Usage] = None
+
+    def add(self, usage: Optional[Usage]) -> None:
+        if usage is None:
+            return
+        self.prompt_tokens += usage.prompt_tokens
+        self.completion_tokens += usage.completion_tokens
+
+    def snapshot(self) -> dict:
+        return {
+            "prompt_tokens": self.prompt_tokens,
+            "completion_tokens": self.completion_tokens,
+            "llm_calls": self.llm_calls,
+        }
+
+
+class MeteredLLM:
+    """包装 AgentLLM，统计 chat/stream 的调用次数与 token 用量。
+
+    stream 可能 yield Usage 对象（LLM_STREAM_USAGE 开启时流末尾），
+    这里把 Usage 累加进 meter、只向上转发字符串增量——
+    run_agent 的流式拼接逻辑完全不感知 Usage。
+    """
+
+    def __init__(self, inner: AgentLLM, meter: _UsageMeter):
+        self._inner = inner
+        self._meter = meter
+
+    def chat(self, messages, tools=None):
+        self._meter.llm_calls += 1
+        turn = self._inner.chat(messages, tools=tools)
+        self._meter.add(turn.usage)
+        return turn
+
+    def stream(self, messages):
+        self._meter.llm_calls += 1
+        for item in self._inner.stream(messages):
+            if isinstance(item, Usage):
+                self._meter.add(item)
+                continue
+            if isinstance(item, str):
+                yield item
+
+
 def final(
     answer: str,
     sources: List[dict],
@@ -27,6 +87,10 @@ def final(
     steps: int,
     elapsed_ms: int,
     agent_id: str = "",
+    mode: str = "",
+    grounded_ratio: Optional[float] = None,
+    segments: Optional[List[dict]] = None,
+    usage: Optional[dict] = None,
 ) -> dict:
     event = {
         "type": "final",
@@ -38,6 +102,14 @@ def final(
     }
     if agent_id:
         event["agent_id"] = agent_id
+    if mode:
+        event["mode"] = mode
+    # grounded_ratio 为 None 时也输出（前端靠 null 区分"无意义"和"全 neutral"）
+    if mode:
+        event["grounded_ratio"] = grounded_ratio
+        event["segments"] = segments or []
+    if usage is not None:
+        event["usage"] = usage
     return event
 
 
@@ -74,10 +146,11 @@ def safe_parse(raw_arguments: str) -> dict:
     return parsed if isinstance(parsed, dict) else {"_raw": raw_arguments}
 
 
-def _answer_messages_no_evidence(question: str) -> List[dict]:
-    """知识库无可用证据时的回答消息: 让模型用自己的知识回答, 并说明来源."""
+def _answer_messages_no_evidence(question: str, mode: str = "reference", persona: str = "") -> List[dict]:
+    """知识库无可用证据时的回答消息: reference 模式让模型用自己的知识回答并声明来源."""
+    prompt = with_persona(NO_EVIDENCE_ANSWER_PROMPT, persona)
     return [
-        {"role": "system", "content": NO_EVIDENCE_ANSWER_PROMPT},
+        {"role": "system", "content": prompt},
         {"role": "user", "content": question},
     ]
 
@@ -91,15 +164,17 @@ def _answer_without_evidence(
     log_dir: Optional[str],
     steps: List[dict],
     done_step: int = 0,
+    mode: str = "reference",
+    persona: str = "",
+    meter: Optional[_UsageMeter] = None,
 ):
-    """无证据兜底回答: 流式输出模型自身知识的回答, grounded=False.
+    """无证据兜底回答（reference 模式）：模型自身知识回答 + attribution 标注.
 
     供两处复用: 知识库为空 / 检索多轮无相关证据.
-    这是产品定位变更后的行为: Agent 连接的模型本身能回答, 知识库只是参考.
     """
     raw = ""
     try:
-        for delta in llm.stream(_answer_messages_no_evidence(question)):
+        for delta in llm.stream(_answer_messages_no_evidence(question, mode, persona)):
             raw += delta
             yield {"type": "answer_delta", "text": delta}
     except Exception as e:
@@ -107,18 +182,53 @@ def _answer_without_evidence(
         yield {"type": "error", "detail": f"大模型调用失败：{type(e).__name__}"}
         return
     answer = raw.strip() or "这个问题我暂时答不上来。"
+    att = attribute(answer, [], question)
     used_ms = elapsed()
-    yield final(answer, [], False, done_step, used_ms, agent_id)
-    _write_run_log(log_dir, question, steps, registry, answer, False, used_ms)
+    yield final(
+        answer,
+        [],
+        att.grounded,
+        done_step,
+        used_ms,
+        agent_id,
+        mode=mode,
+        grounded_ratio=att.grounded_ratio,
+        segments=_segments_payload(att),
+        usage=meter.snapshot() if meter else None,
+    )
+    _write_run_log(
+        log_dir, question, steps, registry, answer, att.grounded, used_ms,
+        mode=mode, grounded_ratio=att.grounded_ratio,
+        numeric_warnings=att.numeric_warnings,
+        usage=meter.snapshot() if meter else None,
+    )
 
 
-def answer_messages(question: str, registry: EvidenceRegistry) -> List[dict]:
+def answer_messages(
+    question: str,
+    registry: EvidenceRegistry,
+    mode: str = "reference",
+    persona: str = "",
+) -> List[dict]:
+    base = STRICT_ANSWER_PROMPT if mode == "strict" else REFERENCE_ANSWER_PROMPT
     return [
-        {"role": "system", "content": ANSWER_PROMPT},
+        {"role": "system", "content": with_persona(base, persona)},
         {
             "role": "user",
             "content": f"证据：\n\n{registry.format_for_prompt()}\n\n问题：{question}",
         },
+    ]
+
+
+def _segments_payload(att: Attribution) -> List[dict]:
+    return [
+        {
+            "text": s.text,
+            "kind": s.kind,
+            "citations": s.citations,
+            "warnings": s.warnings,
+        }
+        for s in att.segments
     ]
 
 
@@ -135,6 +245,7 @@ def run_agent(
     rerank_llm: Optional[AgentLLM] = None,
     persona: str = "",
     agent_id: str = "",
+    answer_mode: str = "reference",
 ) -> Iterator[dict]:
     """产出事件流的同步生成器，由 SSE 层包装成异步响应。
 
@@ -145,31 +256,51 @@ def run_agent(
     决定这个专家「怎么说话」；检索与引用校验的行为完全不变。
     agent_id 只用于 final 事件回带与运行日志区分，空串即旧行为。
     """
+    if answer_mode not in VALID_MODES:
+        raise ValueError(f"answer_mode 必须是 {VALID_MODES} 之一，收到 {answer_mode!r}")
+
     started = time.monotonic()
     registry = EvidenceRegistry()
-    system_prompt = SYSTEM_PROMPT if not persona else SYSTEM_PROMPT + "\n\n" + persona.strip()
+    meter = _UsageMeter()
+    llm = MeteredLLM(llm, meter)
+    effective_decompose_llm = MeteredLLM(decompose_llm, meter) if decompose_llm else None
+    effective_rerank_llm = (
+        MeteredLLM(rerank_llm, meter) if (enable_rerank and rerank_llm) else None
+    )
+
+    base_research = RESEARCH_PROMPT_STRICT if answer_mode == "strict" else RESEARCH_PROMPT_REFERENCE
     messages = [
-        {"role": "system", "content": system_prompt},
+        {"role": "system", "content": with_persona(base_research, persona)},
         {"role": "user", "content": question},
     ]
     seen_calls: set = set()
     consecutive_errors = 0
     steps: List[dict] = []
     step = 0
-    effective_rerank_llm = (rerank_llm or llm) if enable_rerank else None
 
     def elapsed() -> int:
         return int((time.monotonic() - started) * 1000)
 
     if kb.is_empty:
-        # 知识库为空不再是死路: 交给模型用自身知识回答(grounded=False 提示前端"无引用").
-        # 走 answer_messages 需要空 registry 的 format_for_prompt, 所以单独发一条无证据 prompt.
-        yield from _answer_without_evidence(question, llm, registry, agent_id, elapsed, log_dir, steps)
+        if answer_mode == "strict":
+            # strict 模式：知识库为空就是没有依据，输出固定话术
+            yield {"type": "answer_delta", "text": NOT_FOUND_ANSWER}
+            yield final(NOT_FOUND_ANSWER, [], True, 0, elapsed(), agent_id, mode="strict",
+                        grounded_ratio=None, segments=[], usage=meter.snapshot())
+            _write_run_log(log_dir, question, steps, registry, NOT_FOUND_ANSWER, True, elapsed(),
+                           mode="strict", grounded_ratio=None, numeric_warnings=0,
+                           usage=meter.snapshot())
+            return
+        # reference：模型自身知识回答 + attribution
+        yield from _answer_without_evidence(
+            question, llm, registry, agent_id, elapsed, log_dir, steps,
+            mode=answer_mode, persona=persona, meter=meter,
+        )
         return
 
     try:
         if enable_decompose and should_attempt_decompose(question):
-            sub_queries = decompose_question(decompose_llm or llm, question)
+            sub_queries = decompose_question(effective_decompose_llm or llm, question)
             if len(sub_queries) > 1:
                 yield {"type": "decompose", "step": 0, "queries": sub_queries}
                 for i, sub_q in enumerate(sub_queries, start=1):
@@ -262,19 +393,51 @@ def run_agent(
         # 达到最大步数时同样进入回答阶段，不再调用工具
 
         if registry.is_empty():
-            # 检索多轮没有相关证据: 不再拒答, 让模型用自身知识回答.
-            yield from _answer_without_evidence(question, llm, registry, agent_id, elapsed, log_dir, steps, done_step=step)
+            if answer_mode == "strict":
+                # strict：检索无果即无依据，输出固定话术拒答
+                yield {"type": "answer_delta", "text": NOT_FOUND_ANSWER}
+                yield final(NOT_FOUND_ANSWER, [], True, step, elapsed(), agent_id, mode="strict",
+                            grounded_ratio=None, segments=[], usage=meter.snapshot())
+                _write_run_log(log_dir, question, steps, registry, NOT_FOUND_ANSWER, True, elapsed(),
+                               mode="strict", grounded_ratio=None, numeric_warnings=0,
+                               usage=meter.snapshot())
+                return
+            # reference：兜底回答 + attribution
+            yield from _answer_without_evidence(
+                question, llm, registry, agent_id, elapsed, log_dir, steps,
+                done_step=step, mode=answer_mode, persona=persona, meter=meter,
+            )
             return
 
         raw = ""
-        for delta in llm.stream(answer_messages(question, registry)):
+        for delta in llm.stream(answer_messages(question, registry, answer_mode, persona)):
             raw += delta
             yield {"type": "answer_delta", "text": delta}
 
         answer, sources, grounded = registry.finalize(raw)
         used_ms = elapsed()
-        yield final(answer, sources, grounded, step, used_ms, agent_id)
-        _write_run_log(log_dir, question, steps, registry, answer, grounded, used_ms)
+        att = attribute(answer, sources, question)
+        if answer_mode == "strict" and answer.strip() == NOT_FOUND_ANSWER:
+            # strict 模式下的合规拒答：有依据比例无意义
+            yield final(answer, sources, True, step, used_ms, agent_id, mode="strict",
+                        grounded_ratio=None, segments=[], usage=meter.snapshot())
+            _write_run_log(log_dir, question, steps, registry, answer, True, used_ms,
+                           mode="strict", grounded_ratio=None, numeric_warnings=0,
+                           usage=meter.snapshot())
+            return
+        yield final(
+            answer, sources, att.grounded, step, used_ms, agent_id,
+            mode=answer_mode,
+            grounded_ratio=att.grounded_ratio,
+            segments=_segments_payload(att),
+            usage=meter.snapshot(),
+        )
+        _write_run_log(
+            log_dir, question, steps, registry, answer, att.grounded, used_ms,
+            mode=answer_mode, grounded_ratio=att.grounded_ratio,
+            numeric_warnings=att.numeric_warnings,
+            usage=meter.snapshot(),
+        )
     except Exception as e:
         # API Key 和堆栈只进服务端日志，前端只看到一句人话
         logger.exception("Agent 运行失败")
@@ -291,6 +454,10 @@ def _write_run_log(
     grounded: bool,
     elapsed_ms: int,
     error: Optional[str] = None,
+    mode: str = "",
+    grounded_ratio: Optional[float] = None,
+    numeric_warnings: int = 0,
+    usage: Optional[dict] = None,
 ) -> None:
     """追加一行运行记录，供后续评测离线分析；写失败不影响响应。"""
     if not log_dir:
@@ -303,6 +470,10 @@ def _write_run_log(
         "answer": answer,
         "grounded": grounded,
         "elapsed_ms": elapsed_ms,
+        "mode": mode,
+        "grounded_ratio": grounded_ratio,
+        "numeric_warnings": numeric_warnings,
+        "usage": usage,
     }
     if error:
         record["error"] = error

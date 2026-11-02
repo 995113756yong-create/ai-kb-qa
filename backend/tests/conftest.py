@@ -43,3 +43,19 @@ def client(embeddings, llm, dirs):
     )
     with TestClient(app) as c:
         yield c
+
+
+@pytest.fixture(autouse=True)
+def _default_feature_flags(monkeypatch):
+    """全局默认关闭新特性，保证旧测试行为不变。
+
+    - EVIDENCE_MIN_SIM = -1：证据门槛关闭（假 Embedding 的余弦不稳定）
+    - ADMIN_TOKEN = ""：写接口不鉴权
+    - RATE_LIMIT_PER_MIN = 0：问答不限流
+    需要测试这些特性的用例在自己的 fixture 里显式覆盖。
+    """
+    from app import config
+
+    monkeypatch.setattr(config, "EVIDENCE_MIN_SIM", -1.0)
+    monkeypatch.setattr(config, "ADMIN_TOKEN", "")
+    monkeypatch.setattr(config, "RATE_LIMIT_PER_MIN", 0)

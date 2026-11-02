@@ -42,3 +42,29 @@
 {"id": "r3", "category": "reject", "question": "产品C的月费是多少？", "expect_answer": "文档中未找到相关信息。", "note": "相似但不存在，最易幻觉"}
 {"id": "r4", "category": "reject", "question": "配置 9999 是谁负责的？", "expect_answer": "文档中未找到相关信息。", "note": "编号格式对但不存在"}
 {"id": "r5", "category": "reject", "question": "请介绍一下贵公司的组织架构和员工人数。", "expect_answer": "文档中未找到相关信息。", "note": "超出文档范围"}
+
+# 健身用例（fitness-coach 专家，服务启动时自动播种语料）
+# 期望值都来自 seed_agents.py 语料原文；agent 字段指定用哪个专家跑
+# modes: 在哪些回答模式下评测（默认 strict + reference 都跑）
+# expect_ratio: 各模式下 grounded_ratio 的期望区间
+# allow_numeric_warnings: 推算类用例允许数字警告
+
+{"id": "ft1", "category": "fact", "agent": "fitness-coach", "question": "新手每周练几次比较合适？", "expect_keywords": ["3"], "expect_sources": ["新手训练计划.txt"], "note": "单点事实：每周3次"}
+{"id": "ft2", "category": "fact", "agent": "fitness-coach", "question": "力量训练的人每天每公斤体重需要多少蛋白质？", "expect_keywords": ["1.6", "2.2"], "expect_sources": ["饮食营养基础.txt"], "note": "数字事实：1.6-2.2克"}
+{"id": "ft3", "category": "fact", "agent": "fitness-coach", "question": "轻松跑的心率应控制在最大心率的多少？", "expect_keywords": ["60", "70"], "expect_sources": ["跑步入门.txt"], "note": "心率区间：60%-70%"}
+{"id": "ft4", "category": "fact", "agent": "fitness-coach", "question": "平板支撑新手从多少秒开始练？", "expect_keywords": ["20"], "note": "平板支撑20秒起步"}
+{"id": "ft5", "category": "fact", "agent": "fitness-coach", "question": "每天应该睡多久才有利于肌肉恢复？", "expect_keywords": ["7", "9"], "expect_sources": ["新手训练计划.txt"], "note": "睡眠7-9小时"}
+
+{"id": "fc1", "category": "compare", "agent": "fitness-coach", "question": "新手力量训练每组做几次？跑步入门前两周每次快走多久？", "expect_keywords": ["8-12", "30"], "expect_min_sources": 2, "note": "跨文档：力量组数 + 快走时长"}
+{"id": "fm1", "category": "multi_hop", "agent": "fitness-coach", "question": "我 70 公斤，按知识库的建议每天大概要吃多少克蛋白质？", "expect_keywords": ["112", "154"], "note": "语料原文有112-154克区间，无需推算"}
+{"id": "fd1", "category": "derived", "agent": "fitness-coach", "question": "我 30 岁，轻松跑的心率大概在什么区间？", "expect_keywords": ["114", "133"], "allow_numeric_warnings": true, "note": "需要推算 220-30=190 → 190*0.6~0.7；观察项，展示数字检查效果"}
+{"id": "fx1", "category": "mixed", "agent": "fitness-coach", "question": "增肌期间每天要吃多少蛋白质？另外肌酸有什么作用？", "expect_keywords": ["1.6"], "expect_ratio": {"reference": [0.01, 0.99]}, "note": "半可答：蛋白质有依据，肌酸语料没有；strict 要求出现「未找到」"}
+{"id": "fp1", "category": "persona", "agent": "fitness-coach", "question": "我跑步的时候膝盖疼，还能继续练吗？", "expect_keywords": ["就医", "医生"], "note": "验证人设：受伤建议就医（B1）"}
+
+{"id": "fr1", "category": "reject", "agent": "fitness-coach", "question": "瑜伽的拜日式具体怎么做？", "expect_answer": "文档中未找到相关信息。", "note": "语料无瑜伽内容"}
+{"id": "fr2", "category": "reject", "agent": "fitness-coach", "question": "体脂秤测出来的体脂率准吗？", "expect_answer": "文档中未找到相关信息。", "note": "语料无体脂内容"}
+{"id": "fr3", "category": "reject", "agent": "fitness-coach", "question": "游泳换气有什么技巧？", "expect_answer": "文档中未找到相关信息。", "note": "语料只出现过一次游泳（保护膝盖），近似负例"}
+
+# default 专家的 mixed 用例：验证双模式行为差异
+{"id": "x1", "category": "mixed", "question": "产品A的月费是多少？SaaS 订阅一般怎么计费？", "expect_keywords": ["30"], "expect_sources": ["产品A.txt"], "expect_ratio": {"reference": [0.01, 0.99]}, "note": "半可答：月费有依据，计费模式靠一般知识；strict 要求出现「未找到」"}
+{"id": "x2", "category": "mixed", "question": "产品B支持按月退订吗？退订一般有哪些注意事项？", "expect_keywords": ["不支持"], "expect_sources": ["产品B.txt"], "expect_ratio": {"reference": [0.01, 0.99]}, "note": "半可答：退订政策有依据，注意事项靠一般知识"}

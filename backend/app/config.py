@@ -59,4 +59,39 @@ RERANK_ENABLED = os.getenv("RERANK_ENABLED", "false").lower() == "true"
 # default 专家不进来，沿用上面的 UPLOAD_DIR / FAISS_DIR / AGENT_LOG_DIR。
 AGENTS_DIR = os.getenv("AGENTS_DIR", os.path.join(BACKEND_DIR, "agents_store"))
 
-AGENT_LOG_DIR = os.getenvAGENT_LOG_DIR = os.getenv("AGENT_LOG_DIR", os.path.join(BACKEND_DIR, "logs"))
+AGENT_LOG_DIR = os.getenv("AGENT_LOG_DIR", os.path.join(BACKEND_DIR, "logs"))
+
+# ============ 可信回答与评测体系（feat/trust-and-eval） ============
+
+# 证据门槛：余弦相似度低于该值、且没有命中编号关键词的片段，不登记为证据。
+# 0.45 是临时值，必须用 eval/calibrate_threshold.py 在真实 Embedding 上校准后更新。
+EVIDENCE_MIN_SIM = float(os.getenv("EVIDENCE_MIN_SIM", "0.45"))
+
+# 默认专家（通用文档问答）的回答模式。
+# strict：只答知识库，无依据时输出固定话术拒答；
+# reference：知识库优先 + 通用知识兜底，并做句子级来源标注。
+DEFAULT_AGENT_ANSWER_MODE = os.getenv("DEFAULT_AGENT_ANSWER_MODE", "strict")
+
+# 管理员口令：设置后，建/删专家、上传、删文档都必须带 X-Admin-Token 请求头；
+# 为空时不校验（仅限本地开发）。
+ADMIN_TOKEN = os.getenv("ADMIN_TOKEN", "")
+
+# 问答限流：每个客户端每分钟最多请求数，0 表示关闭。
+RATE_LIMIT_PER_MIN = int(os.getenv("RATE_LIMIT_PER_MIN", "10"))
+
+# 是否信任 X-Forwarded-For。经 Next.js 转发部署时必须设为 true，
+# 否则所有用户共用一个限流桶。
+TRUST_PROXY = os.getenv("TRUST_PROXY", "false").lower() == "true"
+
+# 流式回答时是否向模型服务请求 usage 统计。
+# 如果服务不支持 stream_options 导致流式请求报错，设为 false（回答阶段用量记 0）。
+LLM_STREAM_USAGE = os.getenv("LLM_STREAM_USAGE", "true").lower() == "true"
+
+# LLM-as-judge 评测模型（建议与生成模型不同，减少自我偏好）
+JUDGE_MODEL = os.getenv("JUDGE_MODEL") or os.getenv("AGENT_MODEL")
+JUDGE_API_BASE = os.getenv("JUDGE_API_BASE") or OPENAI_API_BASE
+JUDGE_API_KEY = os.getenv("JUDGE_API_KEY") or OPENAI_API_KEY
+
+# 评测费用估算（元 / 百万 token），用于报告；不配则显示"未配置"
+PRICE_INPUT_PER_M = float(os.getenv("PRICE_INPUT_PER_M", "0") or 0)
+PRICE_OUTPUT_PER_M = float(os.getenv("PRICE_OUTPUT_PER_M", "0") or 0)

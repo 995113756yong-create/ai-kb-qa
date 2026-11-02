@@ -7,8 +7,9 @@ export const dynamic = "force-dynamic";
 
 type Ctx = { params: Promise<{ path: string[] }> };
 
-// 只透传这几项请求头，其余（cookie、host、authorization 等）不下传
-const PASS_REQ = ["content-type", "accept", "accept-language"];
+// 只透传这几项请求头，其余（cookie、host、authorization 等）不下传。
+// x-admin-token：写接口鉴权口令；x-forwarded-for：问答限流的客户端 IP。
+const PASS_REQ = ["content-type", "accept", "accept-language", "x-admin-token"];
 
 // 这些响应头描述的是后端那一跳的传输方式，透传会破坏本跳的流式传输
 const DROP_RES = ["content-encoding", "content-length", "transfer-encoding", "connection"];
@@ -38,6 +39,18 @@ async function proxy(req: NextRequest, ctx: Ctx): Promise<Response> {
     if (value) {
       headers.set(name, value);
     }
+  }
+
+  // 透传客户端真实 IP 给后端限流。
+  // 容器里所有请求的 source 都是 Next.js pod，不传 XFF 后端就只能全站共享一个限流桶。
+  // 优先级与常见反代（nginx）一致：已有 XFF 就追加，否则用 x-real-ip。
+  const clientIp =
+    req.headers.get("x-forwarded-for")?.split(",")[0].trim() ||
+    req.headers.get("x-real-ip") ||
+    "";
+  if (clientIp) {
+    const existing = headers.get("x-forwarded-for");
+    headers.set("x-forwarded-for", existing ? `${existing}, ${clientIp}` : clientIp);
   }
 
   const hasBody = req.method !== "GET" && req.method !== "HEAD";
