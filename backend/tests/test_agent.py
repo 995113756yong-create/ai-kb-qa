@@ -133,28 +133,35 @@ def test_no_citation_marks_ungrounded(tmp_path, embeddings):
 # ---------- 4. 没有证据 ----------
 
 
-def test_no_evidence_returns_not_found(tmp_path, embeddings):
+def test_no_evidence_falls_back_to_model_answer(tmp_path, embeddings):
+    """产品定位变更: 知识库无相关证据时不再拒答, 用模型自身知识回答并 grounded=False."""
     kb = _kb(tmp_path, embeddings)
-    llm = ScriptedLLM(turns=[AssistantTurn(content="我不知道，直接回答。", tool_calls=[])])
+    llm = ScriptedLLM(
+        turns=[AssistantTurn(content="我不知道，直接回答。", tool_calls=[])],
+        answer_chunks=["这是一般知识回答。"],
+    )
 
     final = _events(run_agent("无关问题", kb, llm, log_dir=None))[-1]
 
-    assert final["answer"] == NOT_FOUND_ANSWER
-    assert final["sources"] == [] and final["grounded"] is True
-    assert llm.stream_calls == 0
+    assert final["answer"] == "这是一般知识回答。"
+    assert final["sources"] == [] and final["grounded"] is False
+    assert llm.stream_calls == 1
 
 
 # ---------- 5. 知识库为空 ----------
 
 
-def test_empty_kb_skips_llm(tmp_path, embeddings):
+def test_empty_kb_falls_back_to_model_answer(tmp_path, embeddings):
+    """知识库为空也不再是死路: 用模型自身知识回答."""
     kb = KnowledgeBase(str(tmp_path / "idx"), embeddings)
-    llm = ScriptedLLM(turns=[])
+    llm = ScriptedLLM(turns=[], answer_chunks=["知识库为空但我仍可以回答。"])
 
     final = _events(run_agent("任意问题", kb, llm, log_dir=None))[-1]
 
-    assert final["answer"] == EMPTY_KB_ANSWER
-    assert llm.chat_calls == 0 and llm.stream_calls == 0
+    assert final["answer"] == "知识库为空但我仍可以回答。"
+    assert final["grounded"] is False
+    # 走的是无证据回答分支, 不进研究循环
+    assert llm.chat_calls == 0 and llm.stream_calls == 1
 
 
 # ---------- 6. 工具参数错误 ----------

@@ -283,8 +283,12 @@ def create_app(
         return {"status": "ok", "question": question, **result}
 
     @app.post("/api/agent/stream")
-    async def agent_stream(req: AgentRequest, request: Request):
-        kb = _agent_kb(request, req.agent_id)
+    async def agent_stream(req: AgentRequest, request: Request, agent_id: str = ""):
+        # agent_id 双通道兜底: 查询串优先, body 兜底.
+        # 前端曾把 agent_id 只放查询串导致检索串库; Pydantic 的 body 默认值
+        # ("default") 是 truthy, 不能用 or 短路合并, 查询串有值必须优先.
+        effective_agent_id = (agent_id or "").strip() or req.agent_id or DEFAULT_AGENT_ID
+        kb = _agent_kb(request, effective_agent_id)
         llm_impl = _require(request, "agent_llm")
         question = req.question.strip()
         if not question:
@@ -295,8 +299,8 @@ def create_app(
         persona = ""
         log_dir = agent_log_dir
         store = getattr(request.app.state, "store", None)
-        if store is not None and req.agent_id != DEFAULT_AGENT_ID:
-            entry = store.get(req.agent_id)
+        if store is not None and effective_agent_id != DEFAULT_AGENT_ID:
+            entry = store.get(effective_agent_id)
             if entry:
                 persona = entry.get("persona") or ""
                 log_dir = store.log_dir_of(req.agent_id)
@@ -311,7 +315,7 @@ def create_app(
             enable_decompose=config.QUERY_DECOMPOSE_ENABLED,
             enable_rerank=config.RERANK_ENABLED,
             persona=persona,
-            agent_id=req.agent_id,
+            agent_id=effective_agent_id,
         )
         return StreamingResponse(
             stream_events(events, request.is_disconnected),

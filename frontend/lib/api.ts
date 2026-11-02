@@ -128,10 +128,16 @@ export async function streamAgent(
   signal?: AbortSignal,
   agentId?: string,
 ): Promise<void> {
+  // agent_id 必须放进请求体：后端 AgentRequest 只解析 body，
+  // 只放 URL 查询串会被忽略（曾在多专家平台上线时踩过这个坑）。
+  const body: Record<string, unknown> = { question };
+  if (agentId && agentId !== DEFAULT_AGENT) {
+    body.agent_id = agentId;
+  }
   const res = await fetch(`/api/agent/stream${agentQuery(agentId)}`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ question }),
+    body: JSON.stringify(body),
     signal,
     cache: "no-store",
   });
