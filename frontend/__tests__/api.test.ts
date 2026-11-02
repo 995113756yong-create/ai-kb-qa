@@ -76,7 +76,11 @@ describe("请求构造", () => {
     expect(url).toBe("/api/upload");
     expect(init.method).toBe("POST");
     expect(init.body).toBeInstanceOf(FormData);
-    expect(init.headers).toBeUndefined();
+    // adminHeaders() 没存口令时返回空对象，不能是 content-type（multipart 边界由浏览器生成）
+    const headers = init.headers as Record<string, string>;
+    expect(headers).toBeDefined();
+    expect(Object.keys(headers)).not.toContain("content-type");
+    expect(Object.keys(headers)).not.toContain("Content-Type");
   });
 
   it("删除请求对 doc_id 做 URL 编码", async () => {
@@ -87,6 +91,42 @@ describe("请求构造", () => {
     const [url, init] = spy.mock.calls[0] as [string, RequestInit];
     expect(url).toBe("/api/docs/a%20b");
     expect(init.method).toBe("DELETE");
+  });
+
+  it("401 时提示输入口令，保存后带 X-Admin-Token 重试一次", async () => {
+    const spy = mockFetch(401, { detail: "需要管理员口令" });
+    spy.mockImplementationOnce(() => Promise.resolve(new Response(JSON.stringify({ detail: "需要管理员口令" }), { status: 401 })));
+    spy.mockImplementation(() =>
+      Promise.resolve(new Response(JSON.stringify({ status: "ok", doc_id: "d", filename: "a.txt", size: 3, chunks: 1, message: "" }), { status: 200 })),
+    );
+    const promptSpy = vi.spyOn(window, "prompt").mockReturnValue("secret-token");
+    window.localStorage.clear();
+
+    const file = new File(["abc"], "a.txt", { type: "text/plain" });
+    await uploadDoc(file);
+
+    // 第一次 401，prompt 后重试带头成功
+    expect(promptSpy).toHaveBeenCalled();
+    expect(spy).toHaveBeenCalledTimes(2);
+    const [, retryInit] = spy.mock.calls[1] as [string, RequestInit];
+    expect((retryInit.headers as Record<string, string>)["X-Admin-Token"]).toBe("secret-token");
+    // 口令已存 localStorage，后续请求直接带
+    expect(window.localStorage.getItem("kbqa_admin_token")).toBe("secret-token");
+    promptSpy.mockRestore();
+    window.localStorage.clear();
+  });
+
+  it("401 时用户取消输入则抛原错误，不重试", async () => {
+    window.localStorage.clear();
+    const spy = mockFetch(401, { detail: "需要管理员口令" });
+    const promptSpy = vi.spyOn(window, "prompt").mockReturnValue(null);
+
+    const file = new File(["abc"], "a.txt", { type: "text/plain" });
+    await expect(uploadDoc(file)).rejects.toThrow("需要管理员口令");
+
+    expect(promptSpy).toHaveBeenCalled();
+    expect(spy).toHaveBeenCalledTimes(1);
+    promptSpy.mockRestore();
   });
 });
 

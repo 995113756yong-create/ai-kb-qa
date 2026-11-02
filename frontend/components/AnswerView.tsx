@@ -2,9 +2,13 @@
 
 import type { MouseEvent } from "react";
 
+import type { Segment as TraceSegment } from "@/lib/types";
+
 type Props = {
   text: string;
   onJump?: (index: number) => void;
+  /** 句子级溯源数据：有值时按句渲染并标注来源底色 */
+  segments?: TraceSegment[] | null;
 };
 
 // 把 [1]、[2] 这类引用渲染成可点击的标签，其余内容一律按纯文本渲染。
@@ -32,10 +36,48 @@ function splitSegments(text: string): Segment[] {
   return segments;
 }
 
-export default function AnswerView({ text, onJump }: Props) {
+function SegmentBody({
+  segment,
+  onJump,
+}: {
+  segment: TraceSegment;
+  onJump?: (index: number) => void;
+}) {
+  // 每段内部仍复用引用渲染逻辑，编号照常可点击
+  const hasWarning = segment.warnings.length > 0;
+  const isGeneral = segment.kind === "general";
+  const style = hasWarning
+    ? "underline decoration-wavy decoration-red-500 decoration-2 underline-offset-4"
+    : isGeneral
+      ? "bg-amber-100/70 underline decoration-dotted decoration-amber-500 decoration-1 underline-offset-4 dark:bg-amber-500/15"
+      : "";
+  const title = hasWarning
+    ? segment.warnings.join("\n")
+    : isGeneral
+      ? "一般知识，非知识库内容"
+      : undefined;
+
+  return (
+    <span data-kind={segment.kind} data-warn={hasWarning ? "true" : undefined} className={style} title={title}>
+      <AnswerView text={segment.text} onJump={onJump} />
+    </span>
+  );
+}
+
+export default function AnswerView({ text, onJump, segments }: Props) {
   function handleClick(event: MouseEvent<HTMLButtonElement>, index: number) {
     event.preventDefault();
     onJump?.(index);
+  }
+
+  if (segments && segments.length > 0) {
+    return (
+      <div className="whitespace-pre-wrap text-[13.5px] leading-7 text-zinc-800 dark:text-zinc-100">
+        {segments.map((segment, i) => (
+          <SegmentBody key={i} segment={segment} onJump={onJump} />
+        ))}
+      </div>
+    );
   }
 
   return (

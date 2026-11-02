@@ -61,6 +61,40 @@ async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 const DEFAULT_AGENT = "default";
+const ADMIN_TOKEN_KEY = "kbqa_admin_token";
+
+/** 管理员口令：用户输入一次后存 localStorage，写接口都带上。 */
+export function adminHeaders(): Record<string, string> {
+  if (typeof window === "undefined") {
+    return {};
+  }
+  const token = window.localStorage.getItem(ADMIN_TOKEN_KEY) ?? "";
+  return token ? { "X-Admin-Token": token } : {};
+}
+
+function saveAdminToken(token: string): void {
+  window.localStorage.setItem(ADMIN_TOKEN_KEY, token);
+}
+
+/** 401 时提示输入口令，保存后重试一次；取消或仍失败则抛最后收到的错误。 */
+async function withAdminRetry<T>(
+  run: (headers: Record<string, string>) => Promise<T>,
+): Promise<T> {
+  try {
+    return await run(adminHeaders());
+  } catch (err) {
+    if (!(err instanceof ApiError) || err.status !== 401) {
+      throw err;
+    }
+    const token =
+      typeof window !== "undefined" ? window.prompt("请输入管理员口令") ?? "" : "";
+    if (!token) {
+      throw err;
+    }
+    saveAdminToken(token);
+    return run(adminHeaders());
+  }
+}
 
 /** 专家级路径：default 不带参数（保持旧路径），其余专家带 ?agent_id=。 */
 function agentQuery(agentId: string | undefined): string {
@@ -77,16 +111,21 @@ export function listDocs(agentId?: string): Promise<DocListResponse> {
 export function uploadDoc(file: File, agentId?: string): Promise<UploadResponse> {
   const form = new FormData();
   form.append("file", file);
-  return requestJson<UploadResponse>(`/api/upload${agentQuery(agentId)}`, {
-    method: "POST",
-    body: form,
-  });
+  return withAdminRetry((headers) =>
+    requestJson<UploadResponse>(`/api/upload${agentQuery(agentId)}`, {
+      method: "POST",
+      body: form,
+      headers,
+    }),
+  );
 }
 
 export function deleteDoc(docId: string, agentId?: string): Promise<DeleteResponse> {
-  return requestJson<DeleteResponse>(
-    `/api/docs/${encodeURIComponent(docId)}${agentQuery(agentId)}`,
-    { method: "DELETE" },
+  return withAdminRetry((headers) =>
+    requestJson<DeleteResponse>(
+      `/api/docs/${encodeURIComponent(docId)}${agentQuery(agentId)}`,
+      { method: "DELETE", headers },
+    ),
   );
 }
 
@@ -107,17 +146,22 @@ export function listAgents(): Promise<AgentListResponse> {
 export function createAgent(
   req: AgentCreateRequest,
 ): Promise<{ status: "ok" } & Record<string, unknown>> {
-  return requestJson("/api/agents", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(req),
-  });
+  return withAdminRetry((headers) =>
+    requestJson("/api/agents", {
+      method: "POST",
+      headers: { "content-type": "application/json", ...headers },
+      body: JSON.stringify(req),
+    }),
+  );
 }
 
 export function deleteAgent(agentId: string): Promise<DeleteResponse> {
-  return requestJson<DeleteResponse>(`/api/agents/${encodeURIComponent(agentId)}`, {
-    method: "DELETE",
-  });
+  return withAdminRetry((headers) =>
+    requestJson<DeleteResponse>(`/api/agents/${encodeURIComponent(agentId)}`, {
+      method: "DELETE",
+      headers,
+    }),
+  );
 }
 
 // ---------- Agent SSE ----------

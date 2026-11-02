@@ -1,4 +1,4 @@
-import type { Source, ToolCallArgs } from "@/lib/types";
+import type { Segment, Source, ToolCallArgs } from "@/lib/types";
 
 // 页面状态里用的消息与步骤模型。和 lib/types.ts 的后端类型分开：
 // 前者是渲染用的视图模型，后者是接口契约。
@@ -23,6 +23,10 @@ export type ChatMessage =
       stopped: boolean;
       error: string | null;
       elapsedMs: number | null;
+      // 句子级溯源（Agent 模式且收到 final 时填充）
+      segments: Segment[] | null;
+      groundedRatio: number | null;
+      answerMode: "strict" | "reference" | null;
     };
 
 // 一次对话 = 一个专家 + 一组消息。切换专家清空消息，旧会话不保留：
