@@ -2,11 +2,14 @@
 import json
 import logging
 import os
+import re
 import shutil
 import threading
+from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
+import numpy as np
 from langchain_community.document_loaders import PyPDFLoader, TextLoader
 from langchain_community.vectorstores import FAISS
 from langchain_core.documents import Document
@@ -24,7 +27,7 @@ from app.config import (
     OPENAI_API_BASE,
     OPENAI_API_KEY,
 )
-from app.retrieval import BM25Index, hybrid_search
+from app.retrieval import BM25Index, fuse_scores, hybrid_search
 
 MANIFEST_FILE = "docs.json"
 MANIFEST_VERSION = 2
@@ -77,6 +80,50 @@ def load_and_split(file_path: str, doc_id: str, source: str) -> List[Document]:
     return chunks
 
 
+@dataclass
+class Hit:
+    """retrieve() 的一条结果。
+
+    score 是融合分（相对值，只用于排序）；
+    vector_sim 是查询与片段的余弦相似度（绝对值，用于证据门槛），
+    与向量是否归一化无关；取不到向量时为 0.0。
+    keyword_hit 表示查询里的编号/型号类 token 在片段中原样出现。
+    """
+
+    doc: Document
+    score: float
+    vector_sim: float
+    keyword_hit: bool
+
+
+# ---------- 编号关键词门槛 ----------
+
+_IDENT_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_\-]*")
+
+
+def identifier_tokens(query: str) -> List[str]:
+    """编号/型号类 token：长度 >= 3 且包含数字，例如 6145、GB1001、X-200。
+
+    FAISS 的语义空间里这类 token 没有语义信息，余弦相似度天然偏低，
+    所以它们是绕过余弦门槛的第二通道。
+    """
+    return [
+        t.lower()
+        for t in _IDENT_RE.findall(query)
+        if len(t) >= 3 and any(c.isdigit() for c in t)
+    ]
+
+
+def has_keyword_hit(tokens: List[str], text: str) -> bool:
+    """token 在文本中按词边界原样出现（不区分大小写）。"""
+    if not tokens:
+        return False
+    low = text.lower()
+    return any(
+        re.search(rf"(?<![a-z0-9]){re.escape(t)}(?![a-z0-9])", low) for t in tokens
+    )
+
+
 class KnowledgeBase:
     """进程内单例：启动时加载一次索引，写入时追加并落盘。"""
 
@@ -89,6 +136,9 @@ class KnowledgeBase:
         # BM25 索引：纯内存，从 FAISS 的 docstore 重建，不额外落盘
         self._bm25 = BM25Index()
         self.hybrid_enabled = HYBRID_SEARCH_ENABLED
+        # {docstore_id: faiss_pos} 反查表缓存；删除文档会改变 FAISS 位置编号，
+        # 所以每次增删后置 None，用时重建。
+        self._pos_by_doc_id: Optional[Dict[str, int]] = None
         self._load()
 
     # ---------- 持久化 ----------
@@ -128,6 +178,7 @@ class KnowledgeBase:
         with open(self._manifest_path(), encoding="utf-8") as f:
             self._docs = json.load(f).get("docs", [])
 
+        self._pos_by_doc_id = None
         self._rebuild_bm25()
 
     def _manifest_is_current(self) -> bool:
@@ -206,6 +257,7 @@ class KnowledgeBase:
                 self._store.add_embeddings(list(zip(texts, vectors)), metadatas=metadatas, ids=ids)
 
             self._docs.append(entry)
+            self._pos_by_doc_id = None
             self._rebuild_bm25()
             try:
                 self._save()
@@ -248,31 +300,123 @@ class KnowledgeBase:
         self._bm25.build(docs, ids)
 
     def search(self, query: str, k: int) -> List[Document]:
-        """检索入口：混合模式返回 RRF 融合结果，否则退回纯向量。"""
+        """固定 RAG / 评测的检索入口：薄封装，走统一的 retrieve()。"""
+        return [h.doc for h in self.retrieve(query, k)]
+
+    def retrieve(self, query: str, k: int, doc_id: Optional[str] = None) -> List[Hit]:
+        """统一检索入口：Agent（search_kb）、固定 RAG、评测都走这里。
+
+        返回带绝对余弦相似度（vector_sim）与编号关键词命中标记（keyword_hit）
+        的结果，证据门槛基于这两个字段判定，retrieve 本身保持中立只给分数。
+        """
+        # 查询向量在锁外计算：与 add_document 向量化放锁外的原则一致，
+        # Embedding 接口是网络调用，锁内执行会阻塞全部检索。
+        q = np.asarray(self.embeddings.embed_query(query), dtype="float32")
+        tokens = identifier_tokens(query)
+
         with self._lock:
             if self._store is None:
                 return []
 
-            if not self.hybrid_enabled:
-                return self._store.similarity_search(query, k=k)
+            fetch = max(k * 2, k + 2)  # 与旧 search() 保持一致，bench 结果不变
 
-            # 两路召回都多取一些候选，给 RRF 更大的融合空间
-            fetch = max(k * 2, k + 2)
-            vector_hits = self._store.similarity_search_with_score(query, k=fetch)
-            bm25_hits = self._bm25.search(query, k=fetch)
-            return hybrid_search(
-                vector_hits,
-                bm25_hits,
-                limit=k,
-                rrf_k=RRF_K,
-                vector_weight=HYBRID_VECTOR_WEIGHT,
-                bm25_weight=HYBRID_BM25_WEIGHT,
-            )
+            # ---- 两路召回 ----
+            if doc_id:
+                total = int(getattr(self._store.index, "ntotal", 0) or 0)
+                vector_hits = self._store.similarity_search_with_score(
+                    query, k=fetch, filter={"doc_id": doc_id},
+                    fetch_k=max(total, fetch, 1),
+                )
+                if self.hybrid_enabled:
+                    raw_bm25 = self._bm25.search(query, k=self._bm25.size)
+                    bm25_hits = [
+                        (d, s) for d, s in raw_bm25
+                        if (d.metadata or {}).get("doc_id") == doc_id
+                    ][:fetch]
+                else:
+                    bm25_hits = []
+            else:
+                vector_hits = self._store.similarity_search_with_score(query, k=fetch)
+                bm25_hits = self._bm25.search(query, k=fetch) if self.hybrid_enabled else []
+
+            # ---- 排序融合 ----
+            if self.hybrid_enabled and bm25_hits:
+                fused = fuse_scores(
+                    vector_hits, bm25_hits,
+                    vector_weight=HYBRID_VECTOR_WEIGHT,
+                    bm25_weight=HYBRID_BM25_WEIGHT,
+                    limit=k,
+                )
+                def _key_of(doc: Document) -> str:
+                    meta = doc.metadata or {}
+                    return str(meta.get("chunk_id") or f"{meta.get('doc_id')}:{meta.get('chunk_index')}")
+                by_key: Dict[str, Tuple[Document, float]] = {}
+                for doc, score in list(vector_hits) + list(bm25_hits):
+                    by_key.setdefault(_key_of(doc), (doc, score))
+                chosen = [(by_key[key][0], score) for key, score in fused if key in by_key]
+            else:
+                # 非混合或 BM25 无结果：按向量距离升序，score = 1 - 归一化距离
+                ordered = sorted(vector_hits, key=lambda ds: ds[1])
+                if not ordered:
+                    return []
+                dists = [d for _, d in ordered]
+                lo, hi = min(dists), max(dists)
+                span = (hi - lo) or 1.0
+                chosen = [(doc, 1.0 - (dist - lo) / span) for doc, dist in ordered[:k]]
+
+            if not chosen:
+                return []
+
+            # ---- 对最终入选结果计算绝对余弦与关键词命中 ----
+            out: List[Hit] = []
+            for doc, score in chosen[:k]:
+                v = self._vector_of(str((doc.metadata or {}).get("chunk_id") or ""))
+                if v is not None:
+                    denom = float(np.linalg.norm(q)) * float(np.linalg.norm(v)) + 1e-12
+                    sim = float(np.dot(q, v) / denom)
+                else:
+                    sim = 0.0
+                out.append(
+                    Hit(
+                        doc=doc,
+                        score=float(score),
+                        vector_sim=sim,
+                        keyword_hit=has_keyword_hit(tokens, doc.page_content),
+                    )
+                )
+            return out
+
+    def _vector_of(self, chunk_id: str) -> Optional[np.ndarray]:
+        """从 FAISS 取回片段向量。在锁内调用。
+
+        反查表 {docstore_id: faiss_pos} 由 index_to_docstore_id 反转得到，
+        增删文档后置 None 重建（删除会重编号 FAISS 位置）。
+        取不到向量（旧格式索引 id 不是 chunk_id）返回 None。
+        """
+        if self._store is None:
+            return None
+        if not chunk_id:
+            return None
+        if self._pos_by_doc_id is None:
+            self._pos_by_doc_id = {
+                str(ds_id): pos
+                for pos, ds_id in self._store.index_to_docstore_id.items()
+            }
+        pos = self._pos_by_doc_id.get(chunk_id)
+        if pos is None:
+            return None
+        try:
+            return np.asarray(self._store.index.reconstruct(int(pos)), dtype="float32")
+        except Exception:
+            return None
 
     def search_with_scores(
         self, query: str, k: int, doc_id: Optional[str] = None
     ) -> List[Tuple[Document, float]]:
-        """带相关度分数的检索；传 doc_id 时只在该文档内检索。"""
+        """已废弃：Agent 已改用 retrieve()，仅为兼容旧测试保留。
+
+        返回的分数是 FAISS 的 L2 距离平方（越小越近），不是相似度。
+        """
         with self._lock:
             if self._store is None:
                 return []
@@ -342,6 +486,7 @@ class KnowledgeBase:
                     target["chunks"],
                 )
             self._docs = [d for d in self._docs if d["doc_id"] != doc_id]
+            self._pos_by_doc_id = None
 
             if getattr(self._store.index, "ntotal", 0):
                 # 删除后必须重建 BM25，否则已删片段还能被关键词路召回，
@@ -351,6 +496,7 @@ class KnowledgeBase:
             else:
                 # 索引空了就彻底清掉，下次上传重建，避免残留空索引
                 self._store = None
+                self._pos_by_doc_id = None
                 self._bm25 = BM25Index()
                 self._drop_index_files()
                 self._write_manifest()

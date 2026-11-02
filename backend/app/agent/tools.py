@@ -2,6 +2,7 @@
 import json
 from typing import Any, Callable, Dict, List, Optional
 
+from app import config
 from app.config import AGENT_SEARCH_K, RERANK_ENABLED
 from app.document import KnowledgeBase
 from app.agent.evidence import EvidenceRegistry
@@ -138,29 +139,49 @@ def search_kb(
 
     # rerank 需要候选池比目标 k 更大才有重排的意义，多取两倍兜底
     fetch_k = k * 2 if rerank_llm is not None else k
-    hits = kb.search_with_scores(query, k=fetch_k, doc_id=doc_id or None)
+    hits = kb.retrieve(query, k=fetch_k, doc_id=doc_id or None)
     if not hits:
         return {"items": [], "message": f"没有检索到与「{query}」相关的内容，可以换关键词再试"}
 
-    docs = [doc for doc, _ in hits]
-    score_by_key = {_doc_key(doc): score for doc, score in hits}
+    # 证据门槛：余弦相似度过低且没命中编号关键词的片段不登记为证据。
+    # 门槛放工具层而不是知识库层：MCP Server 也复用 execute_tool，两边同时生效。
+    min_sim = config.EVIDENCE_MIN_SIM
+    if min_sim >= 0:
+        passed = [h for h in hits if h.keyword_hit or h.vector_sim >= min_sim]
+        if not passed:
+            best = max(h.vector_sim for h in hits)
+            return {
+                "items": [],
+                "message": (
+                    f"检索到 {len(hits)} 条，但相关度都低于阈值（最高 {best:.2f} < {min_sim}）。"
+                    "可以换关键词；多次仍无结果说明知识库中没有相关内容"
+                ),
+            }
+        hits = passed
 
+    docs = [h.doc for h in hits]
     if rerank_llm is not None:
         docs = rerank(rerank_llm, query, docs)
+        docs = docs[:k]
+    sim_by_key = {_doc_key(doc): h.vector_sim for doc, h in zip(docs, hits[: len(docs)])}
+    match_by_key = {_doc_key(doc): h for doc, h in zip(docs, hits[: len(docs)])}
 
-    docs = docs[:k]
     evidences = registry.register_many(docs)
-    scores = [round(float(score_by_key.get(_doc_key(doc), 0.0)), 4) for doc in docs]
-    return {
-        "items": [
+    items = []
+    scores = []
+    for evidence in evidences:
+        h = match_by_key.get(_doc_key(evidence.document))
+        sim = round(float(h.vector_sim), 3) if h else 0.0
+        scores.append(sim)
+        items.append(
             {
                 "evidence_id": evidence.evidence_id,
                 "text": _format_evidence(evidence, evidence.document.page_content),
+                "relevance": sim,
+                "match": "keyword" if (h and h.keyword_hit) else "semantic",
             }
-            for evidence in evidences
-        ],
-        "scores": scores,
-    }
+        )
+    return {"items": items, "scores": scores}
 
 
 def _doc_key(doc) -> str:
