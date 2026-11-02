@@ -2,6 +2,8 @@
 
 上传文档后自动切分、向量化，再基于文档内容回答问题。系统提供两条问答路径：**固定 RAG**（一次检索）作为对照基线，**手写 ReAct Agent**（多步检索 + 证据引用 + 流式输出）作为主路径。
 
+支持**多专家模式**：可以创建任意领域的专家（每个专家有独立知识库 + 独立人设），内置一个开箱即用的「健身教练」专家作为示范。
+
 **在线演示**：https://ldflnavviuft.cloud.sealos.io
 
 ## 架构
@@ -20,6 +22,8 @@ FastAPI（端口 8000，全部 AI 逻辑在这里）
   ├─ Agent     /api/agent/stream 手写 ReAct 循环 → SSE 事件流
   │     ├─ 研究阶段：模型决定调用 search_kb / read_chunk / list_documents
   │     └─ 回答阶段：只带已登记的证据，流式生成 + 引用校验
+  ├─ 多专家    /api/agents  AgentStore：每专家独立知识库/人设/日志
+  │     └─ default 专家沿用旧目录，已有部署零迁移
   ├─ 知识库    FAISS 索引 + docs.json 清单（进程内单例，带锁）
   └─ 运行日志  logs/agent_runs.jsonl（供离线评测）
 ```
@@ -58,6 +62,7 @@ FastAPI（端口 8000，全部 AI 逻辑在这里）
 - **安全加固**：上传文件由服务端重命名，限制类型与大小；删除接口校验 ID 格式；转发层拒绝路径穿越
 - **混合检索**：向量 + BM25 关键词检索融合，解决配置号/型号等精确标识符的召回短板（见「混合检索」一节）
 - **问答界面**：品牌色渐变 + 思考中动态指示 + 消息进场动效，深浅色自适应
+- **多专家平台**：自建任意领域专家（独立知识库 + 人设 + 欢迎语），内置健身教练专家与 4 份健身语料；知识库按专家完全隔离
 
 ## 项目结构
 
@@ -70,6 +75,8 @@ ai-kb-qa/
 │   │   ├── retrieval.py        # BM25 + 向量融合（归一化加权 + max 合并）
 │   │   ├── qa.py               # 固定 RAG 链与 QAService
 │   │   ├── mcp_server.py       # MCP Server（JSON-RPC 2.0 over stdio）
+│   │   ├── agent_store.py      # 多专家存储（每专家独立知识库）
+│   │   ├── seed_agents.py      # 内置专家播种（健身教练 + 语料）
 │   │   ├── main.py             # 应用工厂 create_app + 全部 HTTP 接口
 │   │   └── agent/
 │   │       ├── llm.py          # AgentLLM 协议 + OpenAI 兼容实现
@@ -174,6 +181,7 @@ npm run dev                     # 访问 http://localhost:3000
 | `HYBRID_VECTOR_WEIGHT` / `HYBRID_BM25_WEIGHT` | `1.0` / `3.0` | 两路融合权重 |
 | `QUERY_DECOMPOSE_ENABLED` | `false` | 复合问题拆解开关，默认关闭，原因见「查询改写与 Rerank」一节 |
 | `RERANK_ENABLED` | `false` | LLM 二次排序开关，默认关闭，原因见同上 |
+| `AGENTS_DIR` | `backend/agents_store` | 多专家存储根目录（每专家一个子目录） |
 | `MAX_UPLOAD_MB` | `10` | 单文件上传上限 |
 | `TOP_K` | `3` | 固定 RAG 的检索片段数 |
 
@@ -193,6 +201,11 @@ npm run dev                     # 访问 http://localhost:3000
 | DELETE | `/api/docs/{doc_id}` | 删除文档（`doc_id` 必须是 32 位小写十六进制） |
 | POST | `/api/ask` | 固定 RAG 问答 |
 | POST | `/api/agent/stream` | Agent 问答，SSE 流式返回 |
+| GET | `/api/agents` | 专家列表（default 永远第一） |
+| POST | `/api/agents` | 新建专家（name 必填；人设/简介/emoji 可选） |
+| DELETE | `/api/agents/{agent_id}` | 删除专家及其全部数据（default 不可删） |
+
+`docs` / `upload` / `ask` / `agent/stream` 均支持 `?agent_id=` 参数路由到对应专家的知识库，不带参数即 default（旧调用零改动）。
 
 `/api/ask` 返回：
 
@@ -315,6 +328,51 @@ npm run dev                     # 访问 http://localhost:3000
 - **失败归因**：带 `error` 字段的行单独统计，区分模型报错、工具异常和超时。
 
 写日志失败只打 warning，不影响响应——日志是旁路，不能成为新的故障点。
+
+## 多专家平台
+
+可以创建任意领域的专家：每个专家一份**人设**（决定怎么说话）+ 一个**完全独立的知识库**（决定能引用什么）。
+内置「健身教练」专家作为完整示范，开箱即用。
+
+### 数据模型
+
+```
+agents_store/
+├── agents.json              # 专家清单（atomic write）
+└── fitness-coach/
+    ├── uploads/             # 该专家的上传文件
+    ├── faiss_index/         # 该专家的 FAISS 索引
+    ├── logs/                # 该专家的运行日志
+    └── ...
+```
+
+- **default 专家不落 agents_store**：沿用 `backend/uploads` + `backend/faiss_index`，
+  已有部署、评测脚本（eval/ 打默认接口）、MCP Server 零迁移。
+- 删除专家 = 删清单 + 删目录（文档、索引、日志全清），default 不可删。
+- 为什么不引入数据库：单人使用的规模下 JSON 清单足够，目录即备份，拷走即迁移。
+
+### 隔离边界
+
+每个专家的 KnowledgeBase 完全独立。实测验证：
+
+```
+问健身专家「产品A的月费」（该文档只在 default 库）
+  → 模型换了 3 次关键词检索无果 → 正确拒答「文档中未找到相关信息。」
+  → 没有串库
+```
+
+切换专家时前端清空消息：跨专家保留消息会让引用指向另一个库的文档，反而误导。
+
+### 人设如何生效
+
+`persona` 拼进 ReAct 研究阶段的 system prompt；检索工具、证据编号、引用校验
+的行为完全不变——人设只改变「怎么说话」，不改变「能引用什么」。防幻觉的边界
+（引用必须来自已登记证据）对每个专家一视同仁。
+
+### 播种幂等
+
+健身语料只在**首次启动且知识库为空**时装载（`.seed_done` 标记）。
+用户删掉语料后重启服务，不会被自动塞回。
 
 ## 查询改写与 Rerank
 

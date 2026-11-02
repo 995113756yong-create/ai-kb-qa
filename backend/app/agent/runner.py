@@ -20,8 +20,15 @@ LOG_FILE = "agent_runs.jsonl"
 MAX_CONSECUTIVE_ERRORS = 3
 
 
-def final(answer: str, sources: List[dict], grounded: bool, steps: int, elapsed_ms: int) -> dict:
-    return {
+def final(
+    answer: str,
+    sources: List[dict],
+    grounded: bool,
+    steps: int,
+    elapsed_ms: int,
+    agent_id: str = "",
+) -> dict:
+    event = {
         "type": "final",
         "answer": answer,
         "sources": sources,
@@ -29,6 +36,9 @@ def final(answer: str, sources: List[dict], grounded: bool, steps: int, elapsed_
         "steps": steps,
         "elapsed_ms": elapsed_ms,
     }
+    if agent_id:
+        event["agent_id"] = agent_id
+    return event
 
 
 def assistant_message(turn: AssistantTurn) -> dict:
@@ -85,16 +95,23 @@ def run_agent(
     enable_rerank: bool = False,
     decompose_llm: Optional[AgentLLM] = None,
     rerank_llm: Optional[AgentLLM] = None,
+    persona: str = "",
+    agent_id: str = "",
 ) -> Iterator[dict]:
     """产出事件流的同步生成器，由 SSE 层包装成异步响应。
 
     enable_decompose / enable_rerank 默认关闭，调用方（通常是 main.py 的生产路径）
     按配置显式打开。decompose_llm / rerank_llm 不传时复用主 llm。
+
+    persona 是专家人设（多专家平台用）：非空时拼进 system prompt，
+    决定这个专家「怎么说话」；检索与引用校验的行为完全不变。
+    agent_id 只用于 final 事件回带与运行日志区分，空串即旧行为。
     """
     started = time.monotonic()
     registry = EvidenceRegistry()
+    system_prompt = SYSTEM_PROMPT if not persona else SYSTEM_PROMPT + "\n\n" + persona.strip()
     messages = [
-        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "system", "content": system_prompt},
         {"role": "user", "content": question},
     ]
     seen_calls: set = set()
@@ -107,7 +124,7 @@ def run_agent(
         return int((time.monotonic() - started) * 1000)
 
     if kb.is_empty:
-        yield final(EMPTY_KB_ANSWER, [], True, 0, elapsed())
+        yield final(EMPTY_KB_ANSWER, [], True, 0, elapsed(), agent_id)
         return
 
     try:
@@ -206,7 +223,7 @@ def run_agent(
 
         if registry.is_empty():
             answer = NOT_FOUND_ANSWER
-            yield final(answer, [], True, step, elapsed())
+            yield final(answer, [], True, step, elapsed(), agent_id)
             _write_run_log(log_dir, question, steps, registry, answer, True, elapsed())
             return
 
@@ -217,7 +234,7 @@ def run_agent(
 
         answer, sources, grounded = registry.finalize(raw)
         used_ms = elapsed()
-        yield final(answer, sources, grounded, step, used_ms)
+        yield final(answer, sources, grounded, step, used_ms, agent_id)
         _write_run_log(log_dir, question, steps, registry, answer, grounded, used_ms)
     except Exception as e:
         # API Key 和堆栈只进服务端日志，前端只看到一句人话

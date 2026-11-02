@@ -14,10 +14,12 @@ services:
       - UPLOAD_DIR=/app/backend/uploads
       - FAISS_DIR=/app/backend/faiss_index
       - AGENT_LOG_DIR=/app/backend/logs
+      - AGENTS_DIR=/app/backend/agents_store
     volumes:
       - backend_uploads:/app/backend/uploads
       - backend_index:/app/backend/faiss_index
       - backend_logs:/app/backend/logs
+      - backend_agents:/app/backend/agents_store
     ports:
       - "8000:8000"
     healthcheck:
@@ -47,3 +49,4 @@ volumes:
   backend_uploads:
   backend_index:
   backend_logs:
+  backend_agents:

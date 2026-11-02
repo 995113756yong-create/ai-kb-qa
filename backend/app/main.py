@@ -17,8 +17,10 @@ from app import config
 from app.agent.llm import AgentLLM, OpenAICompatibleLLM
 from app.agent.runner import run_agent
 from app.agent.sse import SSE_HEADERS, stream_events
+from app.agent_store import AgentStore, DEFAULT_AGENT_ID
 from app.document import KnowledgeBase, get_embeddings, load_and_split
 from app.qa import QAService, get_llm
+from app.seed_agents import ensure_seed_agents
 
 READ_BLOCK = 1024 * 1024
 DOC_ID_RE = re.compile(r"^[0-9a-f]{32}$")
@@ -29,10 +31,23 @@ logger = logging.getLogger(__name__)
 
 class AskRequest(BaseModel):
     question: str = Field(..., min_length=1, max_length=1000)
+    agent_id: str = Field(DEFAULT_AGENT_ID, max_length=32)
 
 
 class AgentRequest(BaseModel):
     question: str = Field(..., min_length=1, max_length=1000)
+    agent_id: str = Field(DEFAULT_AGENT_ID, max_length=32)
+
+
+class AgentCreateRequest(BaseModel):
+    """新建专家。name 必填，其余可选；agent_id 可自定义（合法时）。"""
+    name: str = Field(..., min_length=1, max_length=40)
+    description: str = Field("", max_length=200)
+    persona: str = Field("", max_length=2000)
+    greeting: str = Field("", max_length=200)
+    emoji: str = Field("", max_length=8)
+    model: str = Field("", max_length=100)
+    agent_id: str = Field("", max_length=32)
 
 
 def _safe_display_name(filename: Optional[str]) -> str:
@@ -50,20 +65,31 @@ def create_app(
     agent_llm: Optional[AgentLLM] = None,
     agent_max_steps: int = config.AGENT_MAX_STEPS,
     agent_log_dir: Optional[str] = config.AGENT_LOG_DIR,
+    agents_dir: Optional[str] = None,
+    seed_builtin: bool = True,
 ) -> FastAPI:
-    """应用工厂：生产环境用默认参数；测试时注入假的 embeddings / llm 和临时目录。"""
+    """应用工厂：生产环境用默认参数；测试时注入假的 embeddings / llm 和临时目录。
+
+    agents_dir 是多专家存储根目录（None 时用 AGENTS_DIR 配置）。
+    seed_builtin=False 时测试里不播种内置专家。
+    """
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
+        nonlocal agent_log_dir
         os.makedirs(upload_dir, exist_ok=True)
         app.state.kb = app.state.qa = app.state.agent_llm = None
+        app.state.store = None
         if embeddings is None and not config.OPENAI_API_KEY:
             # 不阻止启动：健康检查照常可用，上传/问答返回 503
             logger.warning(MISSING_KEY_MSG)
         else:
-            kb = KnowledgeBase(index_dir, embeddings or get_embeddings())
+            emb = embeddings or get_embeddings()
+            kb = KnowledgeBase(index_dir, emb)
             app.state.kb = kb
-            app.state.qa = QAService(kb, llm or get_llm())
+            qa_llm = llm or get_llm()
+            app.state.qa_llm = qa_llm
+            app.state.qa = QAService(kb, qa_llm)
             # Agent 用独立模型（需要稳定的 tools 调用能力），与固定 RAG 分开配置。
             # 没配 Key 时保持 None，/api/agent/stream 会返回 503；
             # 不能在这里无条件构造客户端，否则未配置 Key 的环境连启动都会失败。
@@ -71,6 +97,21 @@ def create_app(
                 app.state.agent_llm = agent_llm
             elif config.OPENAI_API_KEY:
                 app.state.agent_llm = OpenAICompatibleLLM()
+
+            # 多专家平台：default 专家沿用旧目录，其余专家在 agents_dir/<id>/ 下
+            store = AgentStore(
+                agents_dir or config.AGENTS_DIR,
+                upload_dir,
+                index_dir,
+                agent_log_dir or config.AGENT_LOG_DIR,
+                emb,
+            )
+            app.state.store = store
+            if seed_builtin:
+                try:
+                    ensure_seed_agents(store)
+                except Exception as e:  # 播种失败绝不阻塞启动
+                    logger.warning("内置专家播种失败：%s", e)
         yield
 
     app = FastAPI(title="AI KB QA System", lifespan=lifespan)
@@ -92,14 +133,80 @@ def create_app(
     def health():
         return {"status": "ok", "message": "server running"}
 
+    def _agent_kb(request: Request, agent_id: str):
+        """按 agent_id 取该专家的知识库；default 走 app.state.kb（零开销兼容）。
+
+        无 Key 环境 kb 可能是 None：_require 会对上传/问答 503，
+        但列表接口允许 None（返回空列表），与旧行为一致。
+        """
+        if not agent_id or agent_id == DEFAULT_AGENT_ID:
+            kb = getattr(request.app.state, "kb", None)
+            if kb is None:
+                raise HTTPException(status_code=503, detail=MISSING_KEY_MSG)
+            return kb
+        store = getattr(request.app.state, "store", None)
+        if store is None:
+            raise HTTPException(status_code=503, detail=MISSING_KEY_MSG)
+        try:
+            return store.kb(agent_id)
+        except KeyError:
+            raise HTTPException(status_code=404, detail=f"专家不存在：{agent_id}")
+
+    def _agent_meta(request: Request, agent_id: str) -> dict:
+        """取专家定义（persona / greeting 等）；default 无自定义时用内置定义。"""
+        store = getattr(request.app.state, "store", None)
+        if store is None:
+            return {}
+        entry = store.get(agent_id)
+        return entry or {}
+
     @app.get("/api/docs")
-    def list_docs(request: Request):
-        kb = request.app.state.kb
-        return {"status": "ok", "docs": kb.list_documents() if kb else []}
+    def list_docs(request: Request, agent_id: str = DEFAULT_AGENT_ID):
+        # 列表接口：服务未就绪时返回空列表，不 503（与旧行为一致）
+        if not agent_id or agent_id == DEFAULT_AGENT_ID:
+            kb = getattr(request.app.state, "kb", None)
+            return {"status": "ok", "docs": kb.list_documents() if kb else []}
+        kb = _agent_kb(request, agent_id)
+        return {"status": "ok", "docs": kb.list_documents()}
+
+    @app.get("/api/agents")
+    def list_agents(request: Request):
+        store = getattr(request.app.state, "store", None)
+        if store is None:
+            raise HTTPException(status_code=503, detail=MISSING_KEY_MSG)
+        return {"status": "ok", "agents": store.list_agents()}
+
+    @app.post("/api/agents")
+    def create_agent(req: AgentCreateRequest, request: Request):
+        if getattr(request.app.state, "store", None) is None:
+            raise HTTPException(status_code=503, detail=MISSING_KEY_MSG)
+        try:
+            entry = request.app.state.store.create(
+                name=req.name,
+                description=req.description,
+                persona=req.persona,
+                greeting=req.greeting,
+                emoji=req.emoji,
+                model=req.model,
+                agent_id=req.agent_id or None,
+            )
+        except ValueError as e:
+            raise HTTPException(status_code=422, detail=str(e))
+        return {"status": "ok", **entry}
+
+    @app.delete("/api/agents/{agent_id}")
+    def delete_agent(agent_id: str, request: Request):
+        store = getattr(request.app.state, "store", None)
+        if store is None:
+            raise HTTPException(status_code=503, detail=MISSING_KEY_MSG)
+        removed = store.delete(agent_id)
+        if removed is None:
+            raise HTTPException(status_code=404, detail=f"专家不存在或不可删除：{agent_id}")
+        return {"status": "ok", **removed}
 
     @app.post("/api/upload")
-    async def upload_file(request: Request, file: UploadFile = File(...)):
-        kb = _require(request, "kb")
+    async def upload_file(request: Request, file: UploadFile = File(...), agent_id: str = DEFAULT_AGENT_ID):
+        kb = _agent_kb(request, agent_id)
         display_name = _safe_display_name(file.filename)
         ext = os.path.splitext(display_name)[1].lower()
         if ext not in config.ALLOWED_EXTENSIONS:
@@ -145,8 +252,8 @@ def create_app(
         }
 
     @app.delete("/api/docs/{doc_id}")
-    def delete_doc(doc_id: str, request: Request):
-        kb = _require(request, "kb")
+    def delete_doc(doc_id: str, request: Request, agent_id: str = DEFAULT_AGENT_ID):
+        kb = _agent_kb(request, agent_id)
         if not DOC_ID_RE.fullmatch(doc_id):
             raise HTTPException(status_code=400, detail="doc_id 格式不合法")
         removed = kb.delete_document(doc_id)
@@ -160,7 +267,12 @@ def create_app(
 
     @app.post("/api/ask")
     def ask_question(req: AskRequest, request: Request):
-        qa = _require(request, "qa")
+        if req.agent_id == DEFAULT_AGENT_ID:
+            qa = _require(request, "qa")
+        else:
+            # 非默认专家：用该专家的知识库 + 同一个固定 RAG 模型新建 QAService。
+            # QAService 构造只是拼一次 prompt 模板，开销可忽略。
+            qa = QAService(_agent_kb(request, req.agent_id), _require(request, "qa_llm"))
         question = req.question.strip()
         if not question:
             raise HTTPException(status_code=422, detail="问题不能为空")
@@ -172,11 +284,22 @@ def create_app(
 
     @app.post("/api/agent/stream")
     async def agent_stream(req: AgentRequest, request: Request):
-        kb = _require(request, "kb")
+        kb = _agent_kb(request, req.agent_id)
         llm_impl = _require(request, "agent_llm")
         question = req.question.strip()
         if not question:
             raise HTTPException(status_code=422, detail="问题不能为空")
+
+        # 专家人设：拼进 system prompt 改变回答风格；检索与引用校验不变。
+        # default 专家无人设（空串），行为与旧版完全一致。
+        persona = ""
+        log_dir = agent_log_dir
+        store = getattr(request.app.state, "store", None)
+        if store is not None and req.agent_id != DEFAULT_AGENT_ID:
+            entry = store.get(req.agent_id)
+            if entry:
+                persona = entry.get("persona") or ""
+                log_dir = store.log_dir_of(req.agent_id)
 
         # run_agent 是同步生成器，交给 sse 层在后台线程里逐条取，避免阻塞事件循环
         events = run_agent(
@@ -184,9 +307,11 @@ def create_app(
             kb,
             llm_impl,
             max_steps=agent_max_steps,
-            log_dir=agent_log_dir,
+            log_dir=log_dir,
             enable_decompose=config.QUERY_DECOMPOSE_ENABLED,
             enable_rerank=config.RERANK_ENABLED,
+            persona=persona,
+            agent_id=req.agent_id,
         )
         return StreamingResponse(
             stream_events(events, request.is_disconnected),

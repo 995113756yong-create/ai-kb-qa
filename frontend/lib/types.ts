@@ -44,6 +44,34 @@ export type AskResponse = {
   sources: Source[];
 };
 
+// ---------- 多专家平台 ----------
+
+export type AgentInfo = {
+  agent_id: string;
+  name: string;
+  description: string;
+  persona: string;
+  greeting: string;
+  emoji: string;
+  model: string;
+  created_at: string;
+  builtin: boolean;
+};
+
+export type AgentListResponse = {
+  status: "ok";
+  agents: AgentInfo[];
+};
+
+export type AgentCreateRequest = {
+  name: string;
+  description?: string;
+  persona?: string;
+  greeting?: string;
+  emoji?: string;
+  agent_id?: string;
+};
+
 export type ToolCallArgs = Record<string, unknown>;
 
 type StepEvent = { type: "step"; step: number };
@@ -72,6 +100,7 @@ type FinalEvent = {
   grounded: boolean;
   steps: number;
   elapsed_ms: number;
+  agent_id?: string;
 };
 type ErrorEvent = { type: "error"; detail: string };
 

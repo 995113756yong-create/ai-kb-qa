@@ -1,6 +1,8 @@
 import { createSSEParser } from "@/lib/sse";
 import type {
+  AgentCreateRequest,
   AgentEvent,
+  AgentListResponse,
   AskResponse,
   DeleteResponse,
   DocListResponse,
@@ -8,6 +10,8 @@ import type {
 } from "@/lib/types";
 
 // 所有请求都打到同源的 /api/*，由 Route Handler 转发给 FastAPI。
+// agent_id 通过查询串传给后端（POST body 也可以，但查询串对转发层完全透明，
+// 不用改 route.ts 的任何逻辑）。default 专家沿用无参数的旧路径。
 
 export class ApiError extends Error {
   readonly status: number;
@@ -56,36 +60,75 @@ async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
   return (await res.json()) as T;
 }
 
-export function listDocs(): Promise<DocListResponse> {
-  return requestJson<DocListResponse>("/api/docs");
+const DEFAULT_AGENT = "default";
+
+/** 专家级路径：default 不带参数（保持旧路径），其余专家带 ?agent_id=。 */
+function agentQuery(agentId: string | undefined): string {
+  if (!agentId || agentId === DEFAULT_AGENT) {
+    return "";
+  }
+  return `?agent_id=${encodeURIComponent(agentId)}`;
 }
 
-export function uploadDoc(file: File): Promise<UploadResponse> {
+export function listDocs(agentId?: string): Promise<DocListResponse> {
+  return requestJson<DocListResponse>(`/api/docs${agentQuery(agentId)}`);
+}
+
+export function uploadDoc(file: File, agentId?: string): Promise<UploadResponse> {
   const form = new FormData();
   form.append("file", file);
-  return requestJson<UploadResponse>("/api/upload", { method: "POST", body: form });
-}
-
-export function deleteDoc(docId: string): Promise<DeleteResponse> {
-  return requestJson<DeleteResponse>(`/api/docs/${encodeURIComponent(docId)}`, {
-    method: "DELETE",
+  return requestJson<UploadResponse>(`/api/upload${agentQuery(agentId)}`, {
+    method: "POST",
+    body: form,
   });
 }
 
-export function ask(question: string): Promise<AskResponse> {
-  return requestJson<AskResponse>("/api/ask", {
+export function deleteDoc(docId: string, agentId?: string): Promise<DeleteResponse> {
+  return requestJson<DeleteResponse>(
+    `/api/docs/${encodeURIComponent(docId)}${agentQuery(agentId)}`,
+    { method: "DELETE" },
+  );
+}
+
+export function ask(question: string, agentId?: string): Promise<AskResponse> {
+  return requestJson<AskResponse>(`/api/ask${agentQuery(agentId)}`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ question }),
   });
 }
 
+// ---------- 多专家平台 ----------
+
+export function listAgents(): Promise<AgentListResponse> {
+  return requestJson<AgentListResponse>("/api/agents");
+}
+
+export function createAgent(
+  req: AgentCreateRequest,
+): Promise<{ status: "ok" } & Record<string, unknown>> {
+  return requestJson("/api/agents", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(req),
+  });
+}
+
+export function deleteAgent(agentId: string): Promise<DeleteResponse> {
+  return requestJson<DeleteResponse>(`/api/agents/${encodeURIComponent(agentId)}`, {
+    method: "DELETE",
+  });
+}
+
+// ---------- Agent SSE ----------
+
 export async function streamAgent(
   question: string,
   onEvent: (event: AgentEvent) => void,
   signal?: AbortSignal,
+  agentId?: string,
 ): Promise<void> {
-  const res = await fetch("/api/agent/stream", {
+  const res = await fetch(`/api/agent/stream${agentQuery(agentId)}`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ question }),
