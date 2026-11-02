@@ -9,7 +9,7 @@ from app.config import AGENT_LOG_DIR, AGENT_MAX_STEPS, AGENT_SEARCH_K
 from app.document import KnowledgeBase
 from app.agent.evidence import EvidenceRegistry
 from app.agent.llm import AgentLLM, AssistantTurn
-from app.agent.prompts import ANSWER_PROMPT, SYSTEM_PROMPT
+from app.agent.prompts import ANSWER_PROMPT, NO_EVIDENCE_ANSWER_PROMPT, SYSTEM_PROMPT
 from app.agent.query_rewrite import decompose_question, should_attempt_decompose
 from app.qa import EMPTY_KB_ANSWER, NOT_FOUND_ANSWER
 from app.agent.tools import TOOL_SCHEMAS, execute_tool, summarize, to_text
@@ -74,6 +74,44 @@ def safe_parse(raw_arguments: str) -> dict:
     return parsed if isinstance(parsed, dict) else {"_raw": raw_arguments}
 
 
+def _answer_messages_no_evidence(question: str) -> List[dict]:
+    """知识库无可用证据时的回答消息: 让模型用自己的知识回答, 并说明来源."""
+    return [
+        {"role": "system", "content": NO_EVIDENCE_ANSWER_PROMPT},
+        {"role": "user", "content": question},
+    ]
+
+
+def _answer_without_evidence(
+    question: str,
+    llm: AgentLLM,
+    registry: EvidenceRegistry,
+    agent_id: str,
+    elapsed,
+    log_dir: Optional[str],
+    steps: List[dict],
+    done_step: int = 0,
+):
+    """无证据兜底回答: 流式输出模型自身知识的回答, grounded=False.
+
+    供两处复用: 知识库为空 / 检索多轮无相关证据.
+    这是产品定位变更后的行为: Agent 连接的模型本身能回答, 知识库只是参考.
+    """
+    raw = ""
+    try:
+        for delta in llm.stream(_answer_messages_no_evidence(question)):
+            raw += delta
+            yield {"type": "answer_delta", "text": delta}
+    except Exception as e:
+        logger.exception("无证据回答失败")
+        yield {"type": "error", "detail": f"大模型调用失败：{type(e).__name__}"}
+        return
+    answer = raw.strip() or "这个问题我暂时答不上来。"
+    used_ms = elapsed()
+    yield final(answer, [], False, done_step, used_ms, agent_id)
+    _write_run_log(log_dir, question, steps, registry, answer, False, used_ms)
+
+
 def answer_messages(question: str, registry: EvidenceRegistry) -> List[dict]:
     return [
         {"role": "system", "content": ANSWER_PROMPT},
@@ -124,7 +162,9 @@ def run_agent(
         return int((time.monotonic() - started) * 1000)
 
     if kb.is_empty:
-        yield final(EMPTY_KB_ANSWER, [], True, 0, elapsed(), agent_id)
+        # 知识库为空不再是死路: 交给模型用自身知识回答(grounded=False 提示前端"无引用").
+        # 走 answer_messages 需要空 registry 的 format_for_prompt, 所以单独发一条无证据 prompt.
+        yield from _answer_without_evidence(question, llm, registry, agent_id, elapsed, log_dir, steps)
         return
 
     try:
@@ -222,9 +262,8 @@ def run_agent(
         # 达到最大步数时同样进入回答阶段，不再调用工具
 
         if registry.is_empty():
-            answer = NOT_FOUND_ANSWER
-            yield final(answer, [], True, step, elapsed(), agent_id)
-            _write_run_log(log_dir, question, steps, registry, answer, True, elapsed())
+            # 检索多轮没有相关证据: 不再拒答, 让模型用自身知识回答.
+            yield from _answer_without_evidence(question, llm, registry, agent_id, elapsed, log_dir, steps, done_step=step)
             return
 
         raw = ""

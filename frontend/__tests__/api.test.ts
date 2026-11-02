@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { ApiError, ask, deleteAgent, deleteDoc, listDocs, uploadDoc } from "@/lib/api";
+import { ApiError, ask, deleteAgent, deleteDoc, listDocs, streamAgent, uploadDoc } from "@/lib/api";
 
 function mockFetch(status: number, body: unknown) {
   const spy = vi.fn().mockResolvedValue({
@@ -125,5 +125,35 @@ describe("agent_id 参数路由", () => {
     const [url, init] = spy.mock.calls[0] as [string, RequestInit];
     expect(url).toBe("/api/agents/cooking");
     expect(init.method).toBe("DELETE");
+  });
+
+  it("streamAgent 必须把 agent_id 放进请求体（串库 bug 回归防护）", async () => {
+    // 后端 AgentRequest 只解析 body；agent_id 只放 URL 查询串会被忽略，
+    // 曾导致切专家后仍检索 default 知识库。这个用例锁住 body 里的 agent_id。
+    // 用 501 让 streamAgent 在读流之前抛 ApiError：此时 fetch 参数已经拿到。
+    const spy = mockFetch(501, { detail: "stop" });
+
+    await expect(
+      streamAgent("怎么练", () => {}, undefined, "fitness-coach"),
+    ).rejects.toThrow(ApiError);
+
+    const [url, init] = spy.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("/api/agent/stream?agent_id=fitness-coach");
+    expect(JSON.parse(String(init.body))).toEqual({
+      question: "怎么练",
+      agent_id: "fitness-coach",
+    });
+  });
+
+  it("streamAgent 对 default 不带 agent_id（旧路径兼容）", async () => {
+    const spy = mockFetch(501, { detail: "stop" });
+
+    await expect(
+      streamAgent("苹果", () => {}, undefined, "default"),
+    ).rejects.toThrow(ApiError);
+
+    const [url, init] = spy.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("/api/agent/stream");
+    expect(JSON.parse(String(init.body))).toEqual({ question: "苹果" });
   });
 });

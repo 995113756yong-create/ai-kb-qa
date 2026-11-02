@@ -281,10 +281,8 @@ describe("多专家平台", () => {
     await waitFor(() => expect(screen.getByTestId("create-agent-button")).toBeInTheDocument());
 
     await userEvent.click(screen.getByTestId("create-agent-button"));
-    const form = await waitFor(() => {
-      const el = screen.getByTestId("create-agent-form");
-      expect(el).toBeInTheDocument();
-      return el;
+    await waitFor(() => {
+      expect(screen.getByTestId("create-agent-form")).toBeInTheDocument();
     });
 
     await userEvent.type(screen.getByTestId("agent-name-input"), "烹饪助手");
