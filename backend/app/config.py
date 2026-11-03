@@ -64,8 +64,8 @@ AGENT_LOG_DIR = os.getenv("AGENT_LOG_DIR", os.path.join(BACKEND_DIR, "logs"))
 # ============ 可信回答与评测体系（feat/trust-and-eval） ============
 
 # 证据门槛：余弦相似度低于该值、且没有命中编号关键词的片段，不登记为证据。
-# 0.45 是临时值，必须用 eval/calibrate_threshold.py 在真实 Embedding 上校准后更新。
-EVIDENCE_MIN_SIM = float(os.getenv("EVIDENCE_MIN_SIM", "0.45"))
+# 真实 Embedding 校准值（eval/calibrate_threshold.py）：正例保留 95.8% / 负例拦截 95.8%。
+EVIDENCE_MIN_SIM = float(os.getenv("EVIDENCE_MIN_SIM", "0.46"))
 
 # 默认专家（通用文档问答）的回答模式。
 # strict：只答知识库，无依据时输出固定话术拒答；

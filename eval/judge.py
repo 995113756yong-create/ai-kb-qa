@@ -7,6 +7,7 @@
 建议评判模型与生成模型不同（JUDGE_MODEL），减少自我偏好。
 """
 import json
+import pathlib
 import re
 
 JUDGE_PROMPT = """你是严格的事实核查员。判断【陈述】是否能被【证据】直接支持。
@@ -31,9 +32,22 @@ class JudgeClient:
 
         import os
 
+        # eval 脚本独立于 backend 进程跑，需要手动加载 backend/.env
+        try:
+            from dotenv import load_dotenv
+
+            load_dotenv(
+                pathlib.Path(__file__).resolve().parent.parent / "backend" / ".env",
+                override=False,
+            )
+        except ImportError:
+            pass
+
         self._client = OpenAI(
             api_key=api_key or os.getenv("JUDGE_API_KEY") or os.getenv("OPENAI_API_KEY"),
             base_url=base_url or os.getenv("JUDGE_API_BASE") or os.getenv("OPENAI_API_BASE", "https://api.siliconflow.cn/v1"),
+            timeout=60.0,
+            max_retries=1,
         )
         self.model = model or os.getenv("JUDGE_MODEL") or os.getenv("AGENT_MODEL")
 

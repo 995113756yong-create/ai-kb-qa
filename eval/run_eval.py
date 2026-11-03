@@ -550,27 +550,7 @@ def main() -> int:
                 args.base, cases, mode, upload=upload, admin_token=args.admin_token
             )
 
-    # LLM-as-judge
-    if args.judge:
-        from eval.judge import JudgeClient, faithfulness, judge_segments
-
-        client = JudgeClient(mock=args.mock)
-        for mode, results in all_results.items():
-            for r in results:
-                if not r.segments or r.error:
-                    continue
-                verdicts = judge_segments(r.segments, r.sources, r.case["question"], client)
-                supported = sum(
-                    1 for _, v in verdicts if v and v.get("supported")
-                )
-                total = sum(1 for _, v in verdicts if v is not None)
-                r.faithfulness = supported / total if total else None
-            print(f"[judge] {mode} 完成")
-
-    all_summaries = {m: summarize(rs) for m, rs in all_results.items()}
-    report = format_report(all_summaries, all_results, args.title)
-
-    # 原始结果落盘（一行一条 JSON）
+    # 原始结果在 judge 之前先落盘：judge 是外部 API 调用，中途失败也不能丢生成结果
     if not args.mock:
         stamp = time.strftime("%Y%m%d-%H%M%S")
         raw_dir = Path(args.raw_dir)
@@ -582,6 +562,27 @@ def main() -> int:
                 encoding="utf-8",
             )
             print(f"原始结果已写入 {path}")
+
+    # LLM-as-judge
+    if args.judge:
+        from eval.judge import JudgeClient, faithfulness, judge_segments
+
+        client = JudgeClient(mock=args.mock)
+        for mode, results in all_results.items():
+            for i, r in enumerate(results, 1):
+                if not r.segments or r.error:
+                    continue
+                verdicts = judge_segments(r.segments, r.sources, r.case["question"], client)
+                supported = sum(
+                    1 for _, v in verdicts if v and v.get("supported")
+                )
+                total = sum(1 for _, v in verdicts if v is not None)
+                r.faithfulness = supported / total if total else None
+                print(f"  [judge {i}/{len(results)}] {mode} {r.case['id']} 支持率 {r.faithfulness}")
+            print(f"[judge] {mode} 完成")
+
+    all_summaries = {m: summarize(rs) for m, rs in all_results.items()}
+    report = format_report(all_summaries, all_results, args.title)
 
     print()
     print(report)

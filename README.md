@@ -451,7 +451,16 @@ agents_store/
 
 ### 校准
 
-`EVIDENCE_MIN_SIM=0.45` 是待校准临时值。用真实 Embedding 跑：
+已用真实 Embedding（bge-large-zh-v1.5）校准：`EVIDENCE_MIN_SIM=0.46`。
+校准时的分布（正例 = 探针+健身 fact 命中片段；负例 = reject 用例+20 条离题问题 top1）：
+
+| 集合 | min | P10 | 中位数 | P90 | max |
+|------|-----|-----|--------|-----|-----|
+| 正例（24 条） | 0.43 | 0.44 | 0.61 | 0.66 | 0.78 |
+| 负例（48 条） | 0.17 | 0.20 | 0.31 | 0.42 | 0.69 |
+
+选 0.46：正例保留 95.8%，负例拦截 95.8%；仅靠关键词通道通过的正例 1 条（编号类探针）。
+重新校准用真实 Embedding 跑：
 
 ```bash
 python -m eval.calibrate_threshold
@@ -605,53 +614,34 @@ python -m eval.bench_retrieval
 
 ## 评测
 
-### 两层评测
+同一批 36 条用例在两种回答模式下各跑一遍（`--mode both --judge`），完整报告见
+`eval/report.md`。2026-11-03 真实评测（DeepSeek-V4.1-Flash + bge-large-zh-v1.5）：
 
-| 层 | 文件 | 测什么 | 是否需要模型 |
-|----|------|--------|:---:|
-| 端到端 | `eval/cases.jsonl` + `run_eval.py` | Agent 完整链路：检索、回答、引用、拒答 | 是 |
-| 检索层 | `eval/retrieval_probes.jsonl` + `bench_retrieval.py` | 只测单次检索的召回 | 仅 Embedding |
+| 指标 | strict | reference | 说明 |
+|------|--------|-----------|------|
+| 整体通过率 | **97.2%** | **86.1%** | 5 项判定全部通过 |
+| 检索命中率 | 100% | 100% | 期望文档出现在 sources |
+| 回答命中率 | 100% | 86.1% | 关键词命中或拒答判定正确 |
+| 引用合法率 | 100% | 100% | 每个 [n] 对应到 sources |
+| 拒答/声明正确率 | 100% | 37.5% | reference 下拒答要求开头声明来源 |
+| 平均知识库依据比例 | 96.5% | 58.2% | grounded_ratio 均值 |
+| 数字一致率 | 95.0% | 100% | 无警告 kb 句 / kb 句总数 |
+| 忠实度（LLM judge） | 91.6% | 89.7% | kb 句被证据支持的比例 |
+| 延迟 P50 / P95 | 16.2s / 44.9s | 19.0s / 77.6s | |
 
-**为什么要分层**：Agent 会多轮换关键词重试，会把单次检索的短板掩盖掉。
-要证明混合检索的价值，必须隔离「检索」这一个变量，否则测出来的提升全是 Agent 的功劳。
+**两种模式的解读**：
+- strict（企业文档问答定位）：除 1 条推算类数字警告外全绿，拒答全部精确。
+- reference（咨询定位）：兜底回答带来覆盖率提升（multi_hop 100% vs strict 75%），
+  但拒答正确率降到 37.5%——模型用一般知识回答时，来源声明措辞不统一，
+  部分回答没在前 120 字内声明"知识库中没有"。这是**产品取舍的可度量代价**，
+  也是 prompt 迭代的明确方向。
 
-### 用法
+复现：
 
 ```bash
-# 端到端（会清空并重灌固定语料，产生模型费用）
-python -m eval.run_eval --base http://localhost:8000 --out eval/report.md
-
-# 只测检索层（快，便宜）
-python -m eval.bench_retrieval
-
-# 不联网，验证脚本本身
-python -m eval.run_eval --mock
+python -m eval.run_eval --base http://localhost:8000 --mode both --judge --admin-token <口令> --out eval/report.md
+python -m eval.calibrate_threshold   # 阈值校准
 ```
-
-### 指标
-
-| 指标 | 含义 |
-|------|------|
-| 检索命中率 | 期望文档出现在 sources 中 |
-| 回答命中率 | 回答包含期望要点 |
-| 引用准确率 | 每个 `[n]` 都能对应到 sources |
-| 拒答准确率 | 文档无答案时给出固定话术 |
-| 精确编号命中 | 配置号/型号类检索，混合检索的重点改善项 |
-| 整体通过率 | 三项判定全部通过 |
-
-### 评测集怎么设计
-
-```
-fact       单点事实，向量检索轻松
-compare    跨文档，考验 Agent 是否分头检索
-precise    配置号/型号，纯向量检索的短板
-multi_hop  需要多步推理
-reject     必须拒答，考验防幻觉
-```
-
-16 条端到端用例 + 20 条检索探针。语料 5 份文档、42 个片段，
-其中配置号与型号故意做成大量结构相似的噪声，让语义检索无法区分。
-
 ## MCP 接入
 
 ### 为什么
