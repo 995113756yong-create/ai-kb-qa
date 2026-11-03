@@ -32,6 +32,10 @@ export default function ChatApp() {
 
   const abortRef = useRef<AbortController | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  // 是否自动跟随滚动：用户贴着底部时才跟随，往上翻了就停。
+  // 流式输出期间每次 answer_delta 都会触发渲染，无条件滚底会把用户正在看的内容顶走。
+  const followRef = useRef(true);
 
   const activeAgent = agents.find((a) => a.agent_id === activeAgentId);
 
@@ -113,8 +117,20 @@ export default function ChatApp() {
   }, []);
 
   useEffect(() => {
+    if (!followRef.current) {
+      return;
+    }
     bottomRef.current?.scrollIntoView({ block: "end" });
   }, [messages]);
+
+  // 用户手动滚动时更新跟随状态：距底部 80px 内视为"贴着底部"。
+  const handleScroll = useCallback(() => {
+    const el = scrollRef.current;
+    if (!el) {
+      return;
+    }
+    followRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+  }, []);
 
   const patchMessage = useCallback((id: string, patch: (m: ChatMessage) => ChatMessage) => {
     setMessages((prev) => prev.map((m) => (m.id === id ? patch(m) : m)));
@@ -219,6 +235,8 @@ export default function ChatApp() {
       };
 
       setMessages((prev) => [...prev, userMessage, assistantMessage]);
+      // 用户发消息 = 想看新回答：恢复跟随滚动
+      followRef.current = true;
       setRunning(true);
       setDrawerOpen(false);
 
@@ -296,7 +314,7 @@ export default function ChatApp() {
 
   const noDocs = docs.length === 0;
   const emptyHint = noDocs
-    ? `${activeAgent?.name ?? "当前专家"}还没有知识库文档，先在左侧上传`
+    ? "输入问题开始对话（没有文档时回答基于一般知识）"
     : "输入问题开始，例如「对比两份文档的结论」";
 
   return (
@@ -375,7 +393,11 @@ export default function ChatApp() {
             </select>
           </div>
 
-          <div className="thin-scroll min-h-0 flex-1 overflow-y-auto px-3 py-4">
+          <div
+            ref={scrollRef}
+            onScroll={handleScroll}
+            className="thin-scroll min-h-0 flex-1 overflow-y-auto px-3 py-4"
+          >
             {messages.length === 0 ? (
               <div className="mt-16 flex flex-col items-center gap-3 text-center">
                 <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-zinc-100 text-2xl shadow-sm dark:bg-zinc-800">
@@ -388,6 +410,13 @@ export default function ChatApp() {
                 ) : (
                   <p className="text-sm text-zinc-400">{emptyHint}</p>
                 )}
+                {noDocs && (
+                  <p className="max-w-md text-xs leading-relaxed text-zinc-400">
+                    没有知识库文档也能对话（回答基于一般知识）。
+                    {activeAgent?.name ?? "这位专家"}是严格模式时，无依据的问题会拒答——
+                    想让它回答自己的资料，先在左侧上传文档。
+                  </p>
+                )}
               </div>
             ) : (
               <MessageList messages={messages} onJumpToSource={jumpToSource} />
@@ -395,7 +424,7 @@ export default function ChatApp() {
             <div ref={bottomRef} />
           </div>
 
-          <ChatInput disabled={noDocs} running={running} onSend={send} onStop={stop} />
+          <ChatInput disabled={false} running={running} onSend={send} onStop={stop} />
         </main>
       </div>
     </div>

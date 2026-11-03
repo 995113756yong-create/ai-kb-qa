@@ -86,12 +86,12 @@ beforeEach(() => {
 });
 
 describe("ChatApp", () => {
-  it("没有文档时输入框禁用并给出引导", async () => {
+  it("没有文档时也能对话（输入框可用），并提示基于一般知识", async () => {
     render(<ChatApp />);
 
     await waitFor(() => expect(mocked.listDocs).toHaveBeenCalled());
-    expect(screen.getByTestId("chat-input")).toBeDisabled();
-    expect(screen.getByText(/先在左侧上传/)).toBeInTheDocument();
+    expect(screen.getByTestId("chat-input")).toBeEnabled();
+    expect(screen.getByText(/没有文档时回答基于一般知识/)).toBeInTheDocument();
   });
 
   it("有文档时可以提问", async () => {
