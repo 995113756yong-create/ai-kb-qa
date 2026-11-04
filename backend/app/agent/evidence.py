@@ -127,6 +127,7 @@ class EvidenceRegistry:
             "doc_id": meta.get("doc_id"),
             "source": meta.get("source"),
             "page": meta.get("page"),
+            "chunk_id": meta.get("chunk_id"),
             "snippet": evidence.document.page_content[:SNIPPET_LEN],
             # 片段全文：attribution 数字一致性检查和 LLM-as-judge 都需要，
             # 只靠 200 字 snippet 会漏判。

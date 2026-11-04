@@ -169,10 +169,20 @@ def search_kb(
     evidences = registry.register_many(docs)
     items = []
     scores = []
+    hits_meta = []
     for evidence in evidences:
         h = match_by_key.get(_doc_key(evidence.document))
         sim = round(float(h.vector_sim), 3) if h else 0.0
         scores.append(sim)
+        meta = evidence.document.metadata or {}
+        hits_meta.append(
+            {
+                "evidence_id": evidence.evidence_id,
+                "source": meta.get("source"),
+                "page": meta.get("page"),
+                "score": sim,
+            }
+        )
         items.append(
             {
                 "evidence_id": evidence.evidence_id,
@@ -181,7 +191,7 @@ def search_kb(
                 "match": "keyword" if (h and h.keyword_hit) else "semantic",
             }
         )
-    return {"items": items, "scores": scores}
+    return {"items": items, "scores": scores, "hits": hits_meta}
 
 
 def _doc_key(doc) -> str:

@@ -10,6 +10,7 @@
 """
 import argparse
 import json
+import subprocess
 import re
 import sys
 import time
@@ -519,6 +520,7 @@ def main() -> int:
     parser.add_argument("--raw-dir", default=str(RESULTS_DIR), help="原始结果目录")
     parser.add_argument("--out", help="报告输出路径")
     parser.add_argument("--title", default="Agent 评测报告")
+    parser.add_argument("--json", help="摘要 JSON 导出路径（供前端评测看板使用）")
     args = parser.parse_args()
 
     if not args.base and not args.mock:
@@ -590,6 +592,47 @@ def main() -> int:
     if args.out:
         Path(args.out).write_text(report + "\n", encoding="utf-8")
         print(f"\n报告已写入 {args.out}")
+
+    # B7：摘要 JSON 导出（前端评测看板数据源）
+    if args.json:
+        try:
+            commit = subprocess.run(
+                ["git", "rev-parse", "--short", "HEAD"],
+                capture_output=True, text=True, timeout=5,
+            ).stdout.strip() or None
+        except Exception:
+            commit = None
+        summary_payload = {
+            "generated_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "title": args.title,
+            "commit": commit,
+            "source": "run_eval",
+            "modes": {},
+        }
+        for m, s in all_summaries.items():
+            mode_data = dict(s)
+            # 补每条用例的细粒度结果（看板列表展示用）
+            mode_data["cases"] = [
+                {
+                    "id": r.case.get("id"),
+                    "question": r.case.get("question"),
+                    "category": r.case.get("category"),
+                    "mode": r.mode,
+                    "answer": r.answer,
+                    "problems": list(getattr(r, "problems", []) or []),
+                    "grounded": getattr(r, "grounded", None),
+                    "steps": getattr(r, "steps", None),
+                    "sources": getattr(r, "sources", None) or [],
+                }
+                for r in all_results.get(m, [])
+            ]
+            summary_payload["modes"][m] = mode_data
+        Path(args.json).parent.mkdir(parents=True, exist_ok=True)
+        Path(args.json).write_text(
+            json.dumps(summary_payload, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        print(f"摘要 JSON 已写入 {args.json}")
 
     return 0 if all(s["errors"] == 0 for s in all_summaries.values()) else 1
 

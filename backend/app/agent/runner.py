@@ -246,6 +246,7 @@ def run_agent(
     persona: str = "",
     agent_id: str = "",
     answer_mode: str = "reference",
+    emit_phases: bool = False,
 ) -> Iterator[dict]:
     """产出事件流的同步生成器，由 SSE 层包装成异步响应。
 
@@ -318,7 +319,8 @@ def run_agent(
                         search_k=search_k, rerank_llm=effective_rerank_llm,
                     )
                     ok = "error" not in result
-                    yield {
+                    hits = result.pop("hits", None)
+                    event = {
                         "type": "tool_result",
                         "step": 0,
                         "id": call_id,
@@ -326,6 +328,9 @@ def run_agent(
                         "ok": ok,
                         "summary": summarize(result),
                     }
+                    if hits:
+                        event["hits"] = hits
+                    yield event
                     steps.append(
                         {
                             "step": 0,
@@ -338,6 +343,8 @@ def run_agent(
                     # 预检索过的查询记入去重表，模型后面原样再查时直接短路，不重复花钱
                     seen_calls.add(f"search_kb:{canonical_json(call_args)}")
 
+        if emit_phases:
+            yield {"type": "phase", "phase": "research"}
         for step in range(1, max_steps + 1):
             yield {"type": "step", "step": step}
             turn = llm.chat(messages, tools=TOOL_SCHEMAS)
@@ -367,8 +374,9 @@ def run_agent(
 
                 ok = "error" not in result
                 consecutive_errors = 0 if ok else consecutive_errors + 1
+                hits = result.pop("hits", None)
                 summary = summarize(result)
-                yield {
+                event = {
                     "type": "tool_result",
                     "step": step,
                     "id": call.id,
@@ -376,6 +384,9 @@ def run_agent(
                     "ok": ok,
                     "summary": summary,
                 }
+                if hits:
+                    event["hits"] = hits
+                yield event
                 steps.append(
                     {
                         "step": step,
@@ -391,6 +402,8 @@ def run_agent(
             if consecutive_errors >= MAX_CONSECUTIVE_ERRORS:
                 break
         # 达到最大步数时同样进入回答阶段，不再调用工具
+        if emit_phases:
+            yield {"type": "phase", "phase": "answer"}
 
         if registry.is_empty():
             if answer_mode == "strict":
