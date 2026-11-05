@@ -186,6 +186,12 @@ def _answer_without_evidence(
     answer = raw.strip() or "这个问题我暂时答不上来。"
     att = attribute(answer, [], question)
     used_ms = elapsed()
+    _write_run_log(
+        log_dir, question, steps, registry, answer, att.grounded, used_ms,
+        mode=mode, grounded_ratio=att.grounded_ratio,
+        numeric_warnings=att.numeric_warnings,
+        usage=meter.snapshot() if meter else None,
+    )
     yield final(
         answer,
         [],
@@ -196,12 +202,6 @@ def _answer_without_evidence(
         mode=mode,
         grounded_ratio=att.grounded_ratio,
         segments=_segments_payload(att),
-        usage=meter.snapshot() if meter else None,
-    )
-    _write_run_log(
-        log_dir, question, steps, registry, answer, att.grounded, used_ms,
-        mode=mode, grounded_ratio=att.grounded_ratio,
-        numeric_warnings=att.numeric_warnings,
         usage=meter.snapshot() if meter else None,
     )
 
@@ -235,10 +235,10 @@ def _answer_chat(
     answer = raw.strip() or "你好，有什么可以帮你？"
     used_ms = elapsed()
     usage = meter.snapshot() if meter else None
-    yield final(answer, [], True, 0, used_ms, agent_id, mode=mode,
-                grounded_ratio=None, segments=[], usage=usage)
     _write_run_log(log_dir, question, steps, registry, answer, True, used_ms,
                    mode=mode, grounded_ratio=None, usage=usage, intent=CHAT)
+    yield final(answer, [], True, 0, used_ms, agent_id, mode=mode,
+                grounded_ratio=None, segments=[], usage=usage)
 
 
 def _answer_list_docs(
@@ -272,10 +272,10 @@ def _answer_list_docs(
     yield {"type": "answer_delta", "text": answer}
     used_ms = elapsed()
     usage = meter.snapshot() if meter else None
-    yield final(answer, [], True, 0, used_ms, agent_id, mode=mode,
-                grounded_ratio=None, segments=[], usage=usage)
     _write_run_log(log_dir, question, steps, registry, answer, True, used_ms,
                    mode=mode, grounded_ratio=None, usage=usage, intent=LIST_DOCS)
+    yield final(answer, [], True, 0, used_ms, agent_id, mode=mode,
+                grounded_ratio=None, segments=[], usage=usage)
 
 
 def answer_messages(
@@ -306,7 +306,7 @@ def _segments_payload(att: Attribution) -> List[dict]:
     ]
 
 
-def run_agent(
+def _run_agent_impl(
     question: str,
     kb: KnowledgeBase,
     llm: AgentLLM,
@@ -374,11 +374,11 @@ def run_agent(
         if answer_mode == "strict":
             # strict 模式：知识库为空就是没有依据，输出固定话术
             yield {"type": "answer_delta", "text": NOT_FOUND_ANSWER}
-            yield final(NOT_FOUND_ANSWER, [], True, 0, elapsed(), agent_id, mode="strict",
-                        grounded_ratio=None, segments=[], usage=meter.snapshot())
             _write_run_log(log_dir, question, steps, registry, NOT_FOUND_ANSWER, True, elapsed(),
                            mode="strict", grounded_ratio=None, numeric_warnings=0,
                            usage=meter.snapshot())
+            yield final(NOT_FOUND_ANSWER, [], True, 0, elapsed(), agent_id, mode="strict",
+                        grounded_ratio=None, segments=[], usage=meter.snapshot())
             return
         # reference：模型自身知识回答 + attribution
         yield from _answer_without_evidence(
@@ -519,11 +519,11 @@ def run_agent(
             if answer_mode == "strict":
                 # strict：检索无果即无依据，输出固定话术拒答
                 yield {"type": "answer_delta", "text": NOT_FOUND_ANSWER}
-                yield final(NOT_FOUND_ANSWER, [], True, step, elapsed(), agent_id, mode="strict",
-                            grounded_ratio=None, segments=[], usage=meter.snapshot())
                 _write_run_log(log_dir, question, steps, registry, NOT_FOUND_ANSWER, True, elapsed(),
                                mode="strict", grounded_ratio=None, numeric_warnings=0,
                                usage=meter.snapshot())
+                yield final(NOT_FOUND_ANSWER, [], True, step, elapsed(), agent_id, mode="strict",
+                            grounded_ratio=None, segments=[], usage=meter.snapshot())
                 return
             # reference：兜底回答 + attribution
             yield from _answer_without_evidence(
@@ -542,12 +542,18 @@ def run_agent(
         att = attribute(answer, sources, question)
         if answer_mode == "strict" and answer.strip() == NOT_FOUND_ANSWER:
             # strict 模式下的合规拒答：有依据比例无意义
-            yield final(answer, sources, True, step, used_ms, agent_id, mode="strict",
-                        grounded_ratio=None, segments=[], usage=meter.snapshot())
             _write_run_log(log_dir, question, steps, registry, answer, True, used_ms,
                            mode="strict", grounded_ratio=None, numeric_warnings=0,
                            usage=meter.snapshot())
+            yield final(answer, sources, True, step, used_ms, agent_id, mode="strict",
+                        grounded_ratio=None, segments=[], usage=meter.snapshot())
             return
+        _write_run_log(
+            log_dir, question, steps, registry, answer, att.grounded, used_ms,
+            mode=answer_mode, grounded_ratio=att.grounded_ratio,
+            numeric_warnings=att.numeric_warnings,
+            usage=meter.snapshot(),
+        )
         yield final(
             answer, sources, att.grounded, step, used_ms, agent_id,
             mode=answer_mode,
@@ -555,24 +561,92 @@ def run_agent(
             segments=_segments_payload(att),
             usage=meter.snapshot(),
         )
-        _write_run_log(
-            log_dir, question, steps, registry, answer, att.grounded, used_ms,
-            mode=answer_mode, grounded_ratio=att.grounded_ratio,
-            numeric_warnings=att.numeric_warnings,
-            usage=meter.snapshot(),
-        )
     except Exception as e:
         # API Key 和堆栈只进服务端日志，前端只看到一句人话
         logger.exception("Agent 运行失败")
-        yield {"type": "error", "detail": f"大模型调用失败：{type(e).__name__}"}
+        # 先写日志再 yield：yield 之后前端可能立刻断开，生成器就不再往下走了
         _write_run_log(log_dir, question, steps, registry, "", False, elapsed(), error=str(e))
+        yield {"type": "error", "detail": f"大模型调用失败：{type(e).__name__}"}
+
+
+
+def run_agent(
+    question: str,
+    kb: KnowledgeBase,
+    llm: AgentLLM,
+    max_steps: int = AGENT_MAX_STEPS,
+    log_dir: Optional[str] = AGENT_LOG_DIR,
+    search_k: int = AGENT_SEARCH_K,
+    enable_decompose: bool = False,
+    enable_rerank: bool = False,
+    decompose_llm: Optional[AgentLLM] = None,
+    rerank_llm: Optional[AgentLLM] = None,
+    persona: str = "",
+    agent_id: str = "",
+    answer_mode: str = "reference",
+    emit_phases: bool = False,
+    enable_intent: bool = False,
+) -> Iterator[dict]:
+    """对外入口。用户停止或断连时（生成器被 close），补写一条 stopped 运行日志。
+
+    正常结束和异常结束的日志由 _run_agent_impl 在发出 final / error 事件之前写好，
+    这里只负责中途被关闭的情况，因此不会写重。
+    """
+    started = time.monotonic()
+    inner = _run_agent_impl(
+        question,
+        kb,
+        llm,
+        max_steps=max_steps,
+        log_dir=log_dir,
+        search_k=search_k,
+        enable_decompose=enable_decompose,
+        enable_rerank=enable_rerank,
+        decompose_llm=decompose_llm,
+        rerank_llm=rerank_llm,
+        persona=persona,
+        agent_id=agent_id,
+        answer_mode=answer_mode,
+        emit_phases=emit_phases,
+        enable_intent=enable_intent,
+    )
+    finished = False
+    partial: List[str] = []
+    calls: List[dict] = []
+    try:
+        for event in inner:
+            etype = event.get("type")
+            if etype in ("final", "error"):
+                finished = True
+            elif etype == "answer_delta":
+                partial.append(event.get("text") or "")
+            elif etype == "tool_call":
+                calls.append(
+                    {"step": event.get("step"), "tool": event.get("name"), "args": event.get("args")}
+                )
+            yield event
+    except GeneratorExit:
+        inner.close()
+        if not finished:
+            _write_run_log(
+                log_dir,
+                question,
+                calls,
+                None,
+                "".join(partial),
+                False,
+                int((time.monotonic() - started) * 1000),
+                mode=answer_mode,
+                stopped=True,
+            )
+        raise
 
 
 def _write_run_log(
     log_dir: Optional[str],
     question: str,
     steps: List[dict],
-    registry: EvidenceRegistry,
+    registry: Optional[EvidenceRegistry],
     answer: str,
     grounded: bool,
     elapsed_ms: int,
@@ -582,6 +656,7 @@ def _write_run_log(
     numeric_warnings: int = 0,
     usage: Optional[dict] = None,
     intent: str = "",
+    stopped: bool = False,
 ) -> None:
     """追加一行运行记录，供后续评测离线分析；写失败不影响响应。"""
     if not log_dir:
@@ -590,7 +665,7 @@ def _write_run_log(
         "ts": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "question": question,
         "steps": steps,
-        "evidence_count": len(registry),
+        "evidence_count": len(registry) if registry is not None else None,
         "answer": answer,
         "grounded": grounded,
         "elapsed_ms": elapsed_ms,
@@ -601,6 +676,9 @@ def _write_run_log(
     }
     if intent:
         record["intent"] = intent
+    if stopped:
+        # 只有被用户停止 / 断连时才写这个字段，正常结束的日志结构保持不变
+        record["stopped"] = True
     if error:
         record["error"] = error
     try:
