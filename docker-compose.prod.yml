@@ -18,7 +18,9 @@ services:
       - backend_logs:/app/backend/logs
       - backend_agents:/app/backend/agents_store
     ports:
-      - "8000:8000"
+      # 只绑环回地址：TRUST_PROXY=true 的前提是后端只能经由 Next.js 访问。
+      # 若这里对外开放，客户端可直连后端自行伪造 X-Forwarded-For 绕过限流。
+      - "127.0.0.1:8000:8000"
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health', timeout=3)"]
       interval: 10s

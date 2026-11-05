@@ -195,19 +195,24 @@ npm run dev                     # 访问 http://localhost:3000
 | `DEFAULT_AGENT_ANSWER_MODE` | `strict` | 默认专家回答模式（strict / reference） |
 | `ADMIN_TOKEN` | 空 | 管理员口令：设置后写接口需要 X-Admin-Token 头 |
 | `RATE_LIMIT_PER_MIN` | `10` | 问答限流：每客户端每分钟请求数，0 关闭 |
-| `TRUST_PROXY` | `false` | 是否信任 X-Forwarded-For（转发部署必须 true） |
+| `TRUST_PROXY` | `false` | 是否信任 X-Forwarded-For（转发部署必须 true）。开启时取 XFF **最右侧**一项，左侧由客户端控制不可信 |
 | `LLM_STREAM_USAGE` | `true` | 流式回答请求 usage 统计；不支持时设 false |
 | `JUDGE_MODEL` / `JUDGE_API_BASE` / `JUDGE_API_KEY` | 复用 OPENAI_* | LLM-as-judge 评判模型（建议与生成模型不同） |
 | `PRICE_INPUT_PER_M` / `PRICE_OUTPUT_PER_M` | 空 | 评测费用估算（元/百万 token） |
 | `AGENTS_DIR` | `backend/agents_store` | 多专家存储根目录（每专家一个子目录） |
 | `MAX_UPLOAD_MB` | `10` | 单文件上传上限 |
 | `TOP_K` | `3` | 固定 RAG 的检索片段数 |
+| `LLM_TIMEOUT_SECONDS` | `60` | 模型调用超时（秒）。流式回答是两 chunk 之间的读超时 |
+| `LLM_MAX_RETRIES` | `1` | 模型 / Embedding 调用失败重试次数上限 |
+| `EMBEDDING_TIMEOUT_SECONDS` | `30` | Embedding 调用超时（秒） |
+| `FEEDBACK_MAX_MB` | `5` | 反馈文件上限（MB），超过后轮转为 `feedback.jsonl.1` |
 
 ### 前端 `frontend/.env`
 
 | 变量 | 默认值 | 说明 |
 |------|--------|------|
 | `BACKEND_URL` | `http://localhost:8000` | 转发层的后端地址，**运行时**读取，可在部署时切换 |
+| `TRUSTED_PROXY_HOPS` | `1` | Next.js 前面会追加 XFF 的可信代理层数；限流只认右数第 N 项，左侧不可信 |
 
 ## 接口
 
@@ -752,6 +757,7 @@ deploy（rollout restart；ai-kb-qa-web 不存在时跳过，不让 job 失败�
 
 - 后端镜像 `ghcr.io/995113756yong-create/ai-kb-qa:latest`，容器端口 8000，需要环境变量 `OPENAI_API_KEY` 和 `AGENT_MODEL`，并给 `/app/backend/uploads`、`/app/backend/faiss_index` 挂载持久卷
 - 前端镜像 `ghcr.io/995113756yong-create/ai-kb-qa-web:latest`，容器端口 3000，开启公网访问，环境变量 `BACKEND_URL=http://ai-kb-qa:8000`（以 Sealos 控制台显示的内网地址为准）
+- **后端 Service 不要配置公网 Ingress**：只允许前端在集群内访问。后端限流依赖 `TRUST_PROXY=true` 取 XFF 判断客户端 IP，一旦后端可被公网直连，客户端就能自行伪造 X-Forwarded-For 绕过限流。本地 `docker-compose.prod.yml` 已把后端端口绑到 `127.0.0.1`。
 
 ### 从 GHCR 拉镜像运行（不本地构建）
 
