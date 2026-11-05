@@ -61,8 +61,22 @@ function TrustBadge({ message }: { message: ChatMessage & { role: "assistant" } 
 }
 
 export default function MessageList({ messages, onJumpToSource }: Props) {
+  if (messages.length === 0) {
+    // 空状态撑满消息区，保证输入框稳定贴在底部
+    return (
+      <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 px-6 text-center">
+        <div className="text-3xl">💬</div>
+        <p className="text-sm font-medium">开始一次对话</p>
+        <p className="max-w-sm text-xs text-muted-foreground">
+          选择一个专家，然后提问。回答会标注知识库依据与数字溯源性。
+        </p>
+      </div>
+    );
+  }
+
   return (
-    <div className="flex flex-col gap-4">
+    <div className="min-h-0 flex-1 overflow-y-auto">
+      <div className="mx-auto flex w-full max-w-3xl flex-col gap-4 px-4 py-6">
       {messages.map((message) => {
         if (message.role === "user") {
           return (
@@ -151,6 +165,7 @@ export default function MessageList({ messages, onJumpToSource }: Props) {
           </article>
         );
       })}
+      </div>
     </div>
   );
 }
