@@ -2,45 +2,87 @@
 
 分支：`feat/ui-revamp`（基于 main@9d994b2）
 方案：`docs/ui-revamp-plan.md`（898 行完整版）
-后端 B1-B8 已完成并提交（256 项测试全绿）。
 
-## 当前状态（2026-11-05 更新）：约 78%
+## 状态：功能完整，测试与构建双绿
 
-### 本轮完成
-- **typecheck 全量清零**（此前 34 个错误：核心 15 + 旧测试 19）
-- **测试 42 通过 / 5 失败**（此前 38 通过 / 12 失败）
-- 修复 `UploadZone`：扩展为双模式组件——`mode="upload"`（默认，直接上传）与 `mode="local"`（仅选文件回调 `onFilesChange`，向导场景创建专家后再上传）
-- 修复 `CreateExpertWizard`：UploadZone 调用改为本地模式（`mode="local" multiple`）
-- 修复 `ExpertSwitcher`：新增 `onCreateAgent` prop 透传给 CreateExpertWizard，修复「新建专家按钮点了没反应」的断链
-- 重写 `AppSidebar`：props 对齐 ChatApp 实际传参（`agentsLoading/currentId/onNewChat/onUpload/onDeleteDoc/onCreateAgent/onDeleteAgent/activeAgent`），内部桥接 ConversationList（`activeId/onSelect/onNew`）与 KnowledgePanel（`uploading/onUpload/onDelete`）
-- `useDocs` 补 `remove(docId)` 方法（调 api.deleteDoc + refresh）
-- `ChatApp`：补 `handleCreateAgent/handleDeleteAgent`（含 toast、刷新专家列表与文档列表、删除当前专家时回落 default）、`syncAddress` 声明顺序修复、`updateLast` 签名适配（内部做 `(m) => updater(m as ChatMessage & {role:"assistant"})` 转换）、补 `createAgent/deleteAgent` 导入
-- 重写 `CommandPalette`：**去掉 useRouter**（违反方案 6.5「不用 Next 路由」，导致测试环境 app router 未挂载报错），改为 `onNavigate` 回调注入
-- 重写旧测试 `ChatApp.test.tsx`（7 用例）与 `stop.test.tsx`（6 用例）至新架构：props 注入初始值、对象式 streamAgent mock、新事件协议（`event.type`：`step/thought/answer_delta/final`）
+| 项 | 状态 |
+|---|---|
+| 后端 B1-B8 | 已完成（commit `ca6b868`） |
+| 设计系统（Tailwind v4 + shadcn） | 完成 |
+| 状态层（useConversations / useAgentRun / useAgents / useDocs / useHotkeys） | 完成 |
+| 组件层（workspace 13 个 + ui 11 个） | 完成 |
+| 三个页面（`/`、`/experts`、`/eval`） | 完成 |
+| 测试 | 47/47 通过 |
+| `tsc --noEmit` | 无错误 |
+| `next build` | 成功，4 条路由 |
 
-### 关键契约（后续开发必读）
-- `AgentInfo` 必填字段：`agent_id/name/description/persona/greeting/emoji/model/answer_mode/created_at/builtin`（测试用 `mkAgent()` 工厂函数）
-- `DocInfo` 字段名：`filename`（非 `name`）、`ext/size/chunks/uploaded_at`
-- `AgentEvent` 类型：`step` 是 `number`（非对象）；`answer_delta` 无 `step` 字段；结束事件是 `final`（非 `done`），字段 `grounded_ratio`（snake_case）
-- `ChatInput` 锚点：placeholder「提问…（Enter 发送，Shift+Enter 换行）」、`data-testid="chat-input"` / `send-button`
-- 模式切换按钮：文本 `Agent` / `快速`（在 ChatApp 顶栏，非 ChatInput 内）
-- `streamAgent(questionOrOptions, onEvent?, signal?, agentId?)` 双签名兼容；`useAgentRun.run({...params, message, update})` 对象式调用
-- 专家切换下拉菜单项查询用 `role: "menuitem"`
+## 本轮修复的真实缺陷
 
-### 剩余工作（约 22%）
-1. **5 个测试运行时失败**（typecheck 已过，纯运行时断言问题）：
-   - ChatApp.test.tsx 3 个：agent 模式答案未渲染（`final` 事件 mock 的字段可能需 `grounded_ratio` 或事件时序问题）、fast 模式按钮点击后 ask 未触发（「快速」按钮查询方式）、持久化断言
-   - stop.test.tsx 2 个：停止流程时序（send-button 文本切换为「停止」的等待）
-   - 排查方向：先在测试里打印 DOM（`screen.debug()`）确认实际渲染，再核对 `useAgentRun` 的 final 事件处理字段（`lib/useAgentRun.ts:152-180`）与 `flushAnswer` 缓冲逻辑
-2. **剩余 workspace 组件**（方案清单里的，按需）：`AnswerMarkdown` 已建，核查 `MessageActions/TrustRing/CitationChip` 是否挂载到 MessageList
-3. **3 个页面**：`app/page.tsx`（首页/落地）、`app/chat/page.tsx`（从 URL 读初始值传 ChatApp）、`app/eval/page.tsx`（评测看板，读 `eval-summary.json`）
-4. **构建验证**：`npm run build` + 更新 `eval-summary.json`（含 commit 字段）
-5. **PR**：feat/ui-revamp → main
+### 1. 停止生成完全失效
 
-### 已验证可用的命令
-```powershell
-cd D:\beacon-projects\ai-kb-qa\frontend
-& npx tsc --noEmit          # typecheck
-& npx vitest run            # 测试
-& npm run build             # 构建（未跑）
+`useAgentRun` 返回的 `cancel` 是 `cancelFlush` —— 只取消 rAF 缓冲，**从不 abort 请求**。
+用户点「停止」后请求继续跑，按钮卡在「停止」。
+
+修复：新增 `controllerRef`，`cancel` 同时 `abort()` + `cancelFlush()`。
+
+### 2. 流式更新全部丢失
+
+`ChatApp.updateLast` 闭包捕获发送那一刻的 `conversations` 状态。
+首次发送时 `create()` 刚生成的会话尚未重渲染，`currentId` 仍为 `null`，
+`if (!currentId) return` 把所有 `answer_delta` / `final` 静默丢弃 —— 用户看到永远「思考中」。
+
+修复：改用 `runTargetRef` 记录本轮 `{convId, assistantId}`，
+`updateLast` 只读 ref 不读 state。`stop` 时**不清空** ref（abort 后还要靠它写回 `stopped`）。
+
+### 3. 持久化换存储会丢用户历史
+
+初版用 IndexedDB（idb-keyval），与线上已有 localStorage 会话不兼容；
+且 jsdom 无 `indexedDB`，组件测试拿不到落盘结果。
+
+修复：`lib/store.ts` 改回 localStorage（key 前缀 `kbqa:conversations:`，按专家隔离）。
+
+### 4. 测试 mock 与真实契约不符
+
+`streamAgent` 真实签名支持对象式（`{question, onEvent, signal, agentId, mode}`）与位置参数两种，
+但 stop 测试的 mock 只按位置参数取 `signal`，拿到 `undefined` → abort 永不触发。
+
+修复：mock 同时兼容两种签名（`opts?.onEvent ?? onEvent`、`opts?.signal ?? positionalSignal`）。
+
+### 5. fast 模式用例提交方式
+
+点「快速」按钮后焦点离开输入框，`user.keyboard("[Enter]")` 不再触发提交。
+修复：改用 `send-button` 提交。
+
+## 评测看板数据 schema
+
+`data/eval-summary.json` 的实际结构与方案第 9 节的初版草图不同，以实际产物为准：
+
+```
+{ generated_at, title, commit, source,
+  modes: { strict|reference: {
+    total, errors,
+    retrieval_rate, answer_rate, citation_rate, reject_rate, pass_rate,
+    avg_ratio, numeric_consistency, faithfulness,
+    latency_p50, latency_p95, avg_tokens, price_in, price_out,
+    by_category: { <cat>: { n, pass_rate } },
+    cases: [{ id, question, category, mode, answer, problems, grounded, steps, sources }]
+  } } }
+```
+
+`lib/evalTypes.ts` 与 `lib/evalSummary.ts` 已按此对齐（`pct`、`modeRows`、`categoryRates`、`failedCases`）。
+
+## 遗留事项
+
+- **PR 未创建**：`gh` 未认证且无 GitHub token。分支已推送，可直接访问
+  https://github.com/995113756yong-create/ai-kb-qa/pull/new/feat/ui-revamp
+- `eval-summary.json` 只有 strict/reference 两种模式的 36 条用例，`by_category` 分类较少（compare/derived/fact 等）
+- Sealos 前端已停服，重新部署后才能看到线上效果
+
+## 常用命令
+
+```bash
+cd frontend
+npx vitest run          # 47 项测试
+npx tsc --noEmit        # 类型检查
+npx next build          # 生产构建
 ```
