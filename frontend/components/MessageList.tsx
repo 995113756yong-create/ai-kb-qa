@@ -96,7 +96,7 @@ export default function MessageList({ messages, onJumpToSource }: Props) {
             {hasSegments ? (
               <TrustBadge message={message} />
             ) : (
-              !message.grounded &&
+              message.groundedRatio === 0 &&
               message.answer && (
                 <p
                   role="status"
@@ -147,7 +147,7 @@ export default function MessageList({ messages, onJumpToSource }: Props) {
               )
             )}
 
-            <SourceCards sources={message.sources} />
+            {!!message.sources?.length && <SourceCards sources={message.sources} />}
           </article>
         );
       })}

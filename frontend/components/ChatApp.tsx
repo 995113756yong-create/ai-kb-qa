@@ -1,432 +1,407 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+// 工作台主组件：会话状态编排 + 布局（左侧栏 + 主对话区）。
+// 不使用 useSearchParams/useRouter，初始值经 props 注入（方案 6.5），
+// 地址栏同步用 window.history.replaceState，避免组件测试 mock Next 路由。
+
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import ChatInput from "@/components/ChatInput";
-import DocSidebar from "@/components/DocSidebar";
+import CommandPalette from "@/components/CommandPalette";
 import MessageList from "@/components/MessageList";
-import { ApiError, ask, listAgents, listDocs, streamAgent } from "@/lib/api";
-import type { ChatMessage, Step } from "@/lib/chat";
-import { stripRawCitations } from "@/lib/answer";
-import type { AgentEvent, AgentInfo, ChatMode, DocInfo } from "@/lib/types";
+import AppSidebar from "@/components/workspace/AppSidebar";
+import { AdminTokenDialog } from "@/components/workspace/AdminTokenDialog";
+import { EvidencePanel } from "@/components/workspace/EvidencePanel";
+import { toast } from "sonner";
 
-let messageSeq = 0;
-function nextId(prefix: string): string {
-  messageSeq += 1;
-  return `${prefix}-${messageSeq}`;
-}
+import type { AskResponse, AgentInfo, AgentCreateRequest } from "@/lib/types";
+import type { ChatMessage } from "@/lib/chat";
+import { ask, listAgents, createAgent, deleteAgent } from "@/lib/api";
+import { useAgentRun } from "@/lib/useAgentRun";
+import { useConversations } from "@/lib/useConversations";
+import { useDocs } from "@/hooks/useDocs";
+import { useElapsed } from "@/hooks/useElapsed";
+import { useHotkeys, type HotkeyHandlers } from "@/hooks/useHotkeys";
 
-const DEFAULT_AGENT_ID = "default";
+type Props = {
+  initialAgentId: string;
+  initialConversationId: string | null;
+};
 
-export default function ChatApp() {
-  // 多专家平台状态
+export default function ChatApp({ initialAgentId, initialConversationId }: Props) {
+  // ---------- 基础状态 ----------
+  const [activeAgentId, setActiveAgentId] = useState(initialAgentId);
   const [agents, setAgents] = useState<AgentInfo[]>([]);
-  const [activeAgentId, setActiveAgentId] = useState<string>(DEFAULT_AGENT_ID);
+  const [agentsLoading, setAgentsLoading] = useState(true);
+  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [mode, setMode] = useState<"agent" | "fast">("agent");
+  const [tokenOpen, setTokenOpen] = useState(false);
+  const [evidence, setEvidence] = useState<{ messageId: string; index: number } | null>(null);
 
-  const [docs, setDocs] = useState<DocInfo[]>([]);
-  const [docsLoading, setDocsLoading] = useState(true);
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [mode, setMode] = useState<ChatMode>("agent");
-  const [running, setRunning] = useState(false);
-  const [drawerOpen, setDrawerOpen] = useState(false);
+  const activeAgent = useMemo(
+    () => agents.find((a) => a.agent_id === activeAgentId) ?? null,
+    [agents, activeAgentId],
+  );
+  const answerMode = activeAgent?.answer_mode ?? null;
 
-  const abortRef = useRef<AbortController | null>(null);
-  const bottomRef = useRef<HTMLDivElement>(null);
-  const scrollRef = useRef<HTMLDivElement>(null);
-  // 是否自动跟随滚动：用户贴着底部时才跟随，往上翻了就停。
-  // 流式输出期间每次 answer_delta 都会触发渲染，无条件滚底会把用户正在看的内容顶走。
-  const followRef = useRef(true);
+  // ---------- Agent 列表 ----------
+  useEffect(() => {
+    setAgentsLoading(true);
+    listAgents()
+      .then((res) => setAgents(res.agents))
+      .catch(() => toast.error("加载专家列表失败"))
+      .finally(() => setAgentsLoading(false));
+  }, []);
 
-  const activeAgent = agents.find((a) => a.agent_id === activeAgentId);
+  // ---------- 会话管理 ----------
+  const {
+    conversations,
+    current,
+    currentId,
+    setCurrentId,
+    create,
+    remove,
+    rename,
+    appendMessages,
+    updateMessage,
+    ensureTitle,
+  } = useConversations(activeAgentId);
 
+  const messages = current?.messages ?? [];
+
+  // ---------- 文档列表 ----------
+  const {
+    docs,
+    loading: docsLoading,
+    refresh: refreshDocs,
+    upload,
+    remove: removeDoc,
+  } = useDocs(activeAgentId);
+
+  // ---------- 地址栏同步 ----------
+  const syncAddress = useCallback((agentId: string, conversationId: string | null) => {
+    const params = new URLSearchParams();
+    if (agentId && agentId !== "default") params.set("agent", agentId);
+    if (conversationId) params.set("c", conversationId);
+    const qs = params.toString();
+    window.history.replaceState(null, "", qs ? `/?${qs}` : "/");
+  }, []);
+
+  // ---------- 专家管理 ----------
   const refreshAgents = useCallback(async () => {
     try {
-      const data = await listAgents();
-      setAgents(data.agents);
+      const res = await listAgents();
+      setAgents(res.agents);
     } catch {
-      // 专家列表读不到（无 Key 环境 / 后端不可用）保持空态
-      setAgents([]);
+      toast.error("加载专家列表失败");
     }
   }, []);
 
-  const refreshDocs = useCallback(async () => {
-    try {
-      const data = await listDocs(activeAgentId);
-      setDocs(data.docs);
-    } catch {
-      setDocs([]);
-    } finally {
-      setDocsLoading(false);
-    }
-  }, [activeAgentId]);
-
-  // 首屏拉专家列表
-  useEffect(() => {
-    let alive = true;
-
-    void listAgents()
-      .then((data) => {
-        if (alive) {
-          setAgents(data.agents);
-        }
-      })
-      .catch(() => {
-        if (alive) {
-          setAgents([]);
-        }
-      });
-
-    return () => {
-      alive = false;
-    };
-  }, []);
-
-  // 切换专家：拉取该专家的文档，清空消息（跨专家保留消息会让引用错位）
-  useEffect(() => {
-    let alive = true;
-
-    void listDocs(activeAgentId)
-      .then((data) => {
-        if (alive) {
-          setDocs(data.docs);
-        }
-      })
-      .catch(() => {
-        if (alive) {
-          setDocs([]);
-        }
-      })
-      .finally(() => {
-        if (alive) {
-          setDocsLoading(false);
-        }
-      });
-
-    return () => {
-      alive = false;
-    };
-  }, [activeAgentId]);
-
-  const selectAgent = useCallback((agentId: string) => {
-    // 生成进行中切专家：先中止
-    abortRef.current?.abort();
-    abortRef.current = null;
-    setActiveAgentId(agentId);
-    setMessages([]);
-    setDrawerOpen(false);
-  }, []);
-
-  useEffect(() => {
-    if (!followRef.current) {
-      return;
-    }
-    bottomRef.current?.scrollIntoView({ block: "end" });
-  }, [messages]);
-
-  // 用户手动滚动时更新跟随状态：距底部 80px 内视为"贴着底部"。
-  const handleScroll = useCallback(() => {
-    const el = scrollRef.current;
-    if (!el) {
-      return;
-    }
-    followRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
-  }, []);
-
-  const patchMessage = useCallback((id: string, patch: (m: ChatMessage) => ChatMessage) => {
-    setMessages((prev) => prev.map((m) => (m.id === id ? patch(m) : m)));
-  }, []);
-
-  const handleAgentEvent = useCallback(
-    (id: string, event: AgentEvent) => {
-      patchMessage(id, (message) => {
-        if (message.role !== "assistant") {
-          return message;
-        }
-        switch (event.type) {
-          case "step":
-            return message;
-          case "decompose":
-            return {
-              ...message,
-              steps: [
-                ...message.steps,
-                { kind: "decompose", key: `${id}-d`, queries: event.queries },
-              ],
-            };
-          case "thought":
-            return {
-              ...message,
-              steps: [
-                ...message.steps,
-                { kind: "thought", key: `${id}-t-${message.steps.length}`, text: event.text },
-              ],
-            };
-          case "tool_call":
-            return {
-              ...message,
-              steps: [
-                ...message.steps,
-                {
-                  kind: "tool_call",
-                  key: `${id}-c-${event.id}`,
-                  name: event.name,
-                  args: event.args,
-                },
-              ],
-            };
-          case "tool_result":
-            return {
-              ...message,
-              steps: [
-                ...message.steps,
-                {
-                  kind: "tool_result",
-                  key: `${id}-r-${event.id}`,
-                  name: event.name,
-                  ok: event.ok,
-                  summary: event.summary,
-                },
-              ],
-            };
-          case "answer_delta":
-            // 流式阶段先拼原始文本（带 [E1]），final 到达后整体替换成已重编的版本
-            return { ...message, answer: message.answer + event.text };
-          case "final":
-            return {
-              ...message,
-              answer: event.answer,
-              sources: event.sources,
-              grounded: event.grounded,
-              elapsedMs: event.elapsed_ms,
-              running: false,
-              segments: event.segments ?? null,
-              groundedRatio: event.grounded_ratio ?? null,
-              answerMode: event.mode ?? null,
-            };
-          case "error":
-            return { ...message, error: event.detail, running: false };
-          default:
-            return message;
-        }
-      });
+  const handleCreateAgent = useCallback(
+    async (payload: AgentCreateRequest) => {
+      try {
+        await createAgent(payload);
+        toast.success(`专家「${payload.name}」创建成功`);
+        await refreshAgents();
+        await refreshDocs();
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : "创建专家失败");
+      }
     },
-    [patchMessage],
+    [refreshAgents, refreshDocs],
   );
 
-  const send = useCallback(
-    async (text: string) => {
-      const userMessage: ChatMessage = { id: nextId("u"), role: "user", text };
-      const assistantId = nextId("a");
-      const assistantMessage: ChatMessage = {
-        id: assistantId,
-        role: "assistant",
-        mode,
-        steps: [] as Step[],
-        answer: "",
-        sources: [],
-        grounded: true,
-        running: true,
-        stopped: false,
-        error: null,
-        elapsedMs: null,
-        segments: null,
-        groundedRatio: null,
-        answerMode: null,
-      };
+  const handleDeleteAgent = useCallback(
+    async (agentId: string) => {
+      try {
+        await deleteAgent(agentId);
+        toast.success("专家已删除");
+        if (agentId === activeAgentId) {
+          setActiveAgentId("default");
+          syncAddress("default", null);
+        }
+        await refreshAgents();
+        await refreshDocs();
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : "删除专家失败");
+      }
+    },
+    [activeAgentId, refreshAgents, refreshDocs, syncAddress],
+  );
 
-      setMessages((prev) => [...prev, userMessage, assistantMessage]);
-      // 用户发消息 = 想看新回答：恢复跟随滚动
-      followRef.current = true;
-      setRunning(true);
-      setDrawerOpen(false);
+  useEffect(() => {
+    syncAddress(activeAgentId, currentId);
+  }, [activeAgentId, currentId, syncAddress]);
+
+  // ---------- Agent 运行 ----------
+  const { running, run, cancel } = useAgentRun();
+
+  // 本轮运行的目标会话与占位消息 id。用 ref 而非 state：
+  // run() 的回调只在启动时捕获一次，读 state 会拿到发送那一刻的旧值。
+  const runTargetRef = useRef<{ convId: string; assistantId: string } | null>(null);
+
+  const updateLast = useCallback(
+    (updater: (m: ChatMessage & { role: "assistant" }) => ChatMessage) => {
+      const target = runTargetRef.current;
+      if (!target || !target.assistantId) return;
+      updateMessage(target.convId, target.assistantId, (m) =>
+        updater(m as ChatMessage & { role: "assistant" }),
+      );
+    },
+    [updateMessage],
+  );
+
+  const [runStartedAt, setRunStartedAt] = useState<number | null>(null);
+  useEffect(() => {
+    setRunStartedAt(running ? Date.now() : null);
+  }, [running]);
+  const elapsed = useElapsed(runStartedAt);
+
+  // ---------- 发送 ----------
+  const send = useCallback(
+    (question: string) => {
+      if (!question.trim() || running) return;
+
+      runTargetRef.current = null;
+      let convId = currentId;
+      if (!convId) convId = create();
+      ensureTitle(convId, question);
+      appendMessages(convId, [{ id: `u-${Date.now()}`, role: "user", text: question, createdAt: Date.now() }]);
+      setEvidence(null);
 
       if (mode === "fast") {
-        try {
-          const result = await ask(text, activeAgentId);
-          patchMessage(assistantId, (m) =>
-            m.role === "assistant"
-              ? { ...m, answer: result.answer, sources: result.sources, running: false }
-              : m,
-          );
-        } catch (e) {
-          const detail = e instanceof ApiError ? e.message : "请求失败，请重试";
-          patchMessage(assistantId, (m) =>
-            m.role === "assistant" ? { ...m, error: detail, running: false } : m,
-          );
-        } finally {
-          setRunning(false);
-        }
+        // 快速问答：一次性 /api/ask，无时间线
+        void ask(question, activeAgentId)
+          .then((res: AskResponse) => {
+            appendMessages(convId, [
+              {
+                id: `a-${Date.now()}`,
+                role: "assistant",
+                mode: "fast",
+                steps: [],
+                answer: res.answer,
+                sources: res.sources,
+                segments: null,
+                groundedRatio: null,
+                answerMode: null,
+                running: false,
+                stopped: false,
+                error: null,
+                elapsedMs: null,
+                createdAt: Date.now(),
+                phase: "done",
+                question,
+                feedback: null,
+              },
+            ]);
+          })
+          .catch((err: unknown) => {
+            const detail = err instanceof Error ? err.message : String(err);
+            appendMessages(convId, [
+              {
+                id: `a-${Date.now()}`,
+                role: "assistant",
+                mode: "fast",
+                steps: [],
+                answer: `获取回答失败：${detail}`,
+                sources: null,
+                segments: null,
+                groundedRatio: null,
+                answerMode: null,
+                running: false,
+                stopped: false,
+                error: detail,
+                elapsedMs: null,
+                createdAt: Date.now(),
+                phase: "done",
+                question,
+                feedback: null,
+              },
+            ]);
+          });
         return;
       }
 
-      const controller = new AbortController();
-      abortRef.current = controller;
-      try {
-        await streamAgent(
-          text,
-          (event) => handleAgentEvent(assistantId, event),
-          controller.signal,
-          activeAgentId,
-        );
-      } catch (e) {
-        // 用户点“停止”会中断 fetch，这里不当作错误
-        if (controller.signal.aborted) {
-          patchMessage(assistantId, (m) =>
-            m.role === "assistant"
-              ? {
-                  ...m,
-                  // 没收到 final，正文里是模型原话的 [E3]，清掉以免显示无法点击的编号
-                  answer: stripRawCitations(m.answer),
-                  running: false,
-                  stopped: true,
-                }
-              : m,
-          );
-        } else {
-          const detail = e instanceof ApiError ? e.message : "连接中断，请重试";
-          patchMessage(assistantId, (m) =>
-            m.role === "assistant"
-              ? { ...m, answer: stripRawCitations(m.answer), error: detail, running: false }
-              : m,
-          );
-        }
-      } finally {
-        patchMessage(assistantId, (m) =>
-          m.role === "assistant" ? { ...m, running: false } : m,
-        );
-        abortRef.current = null;
-        setRunning(false);
-      }
+      // agent 交互模式：走流式时间线
+      run({
+        agentId: activeAgentId,
+        question,
+        mode: "agent",
+        answerMode: answerMode ?? undefined,
+        message: (msg) => {
+          // run 注入完整 assistant 占位消息，追加进当前会话并登记为本轮更新目标
+          if (convId) {
+            runTargetRef.current = { convId, assistantId: msg.id };
+            appendMessages(convId, [msg]);
+          }
+        },
+        update: updateLast,
+      });
     },
-    [activeAgentId, handleAgentEvent, mode, patchMessage],
+    [activeAgentId, answerMode, appendMessages, create, currentId, ensureTitle, mode, run, running, updateLast],
   );
 
   const stop = useCallback(() => {
-    abortRef.current?.abort();
-    abortRef.current = null;
-    setRunning(false);
-  }, []);
+    // 不清 runTargetRef：abort 后还要靠它把 stopped 状态写回这条消息
+    cancel();
+  }, [cancel]);
+
+  const newChat = useCallback(() => {
+    cancel();
+    runTargetRef.current = null;
+    create();
+    setEvidence(null);
+  }, [cancel, create]);
+
+  const switchAgent = useCallback(
+    (agentId: string) => {
+      cancel();
+      runTargetRef.current = null;
+      setActiveAgentId(agentId);
+      syncAddress(agentId, null);
+    },
+    [cancel, syncAddress],
+  );
 
   const jumpToSource = useCallback((messageId: string, index: number) => {
-    const el = document.querySelector(`#${messageId} [data-testid="source-card-${index}"]`);
-    el?.scrollIntoView({ behavior: "smooth", block: "center" });
+    setEvidence({ messageId, index });
   }, []);
 
-  const noDocs = docs.length === 0;
-  const emptyHint = noDocs
-    ? "输入问题开始对话（没有文档时回答基于一般知识）"
-    : "输入问题开始，例如「对比两份文档的结论」";
+  // ---------- 快捷键 ----------
+  const hotkeys: HotkeyHandlers = useMemo(
+    () => ({
+      onOpenPalette: () => window.dispatchEvent(new Event("kb:open-palette")),
+      onToggleSidebar: () => setSidebarOpen((v) => !v),
+      onEscape: () => setEvidence(null),
+    }),
+    [],
+  );
+  useHotkeys(hotkeys);
 
+  // ---------- 渲染 ----------
   return (
-    <div className="flex h-full min-h-screen flex-col bg-zinc-50 dark:bg-zinc-950">
-      <header className="flex items-center gap-3 border-b border-zinc-200/70 bg-white/80 px-4 py-2.5 backdrop-blur-sm dark:border-zinc-800/70 dark:bg-zinc-950/80">
-        <button
-          type="button"
-          onClick={() => setDrawerOpen(true)}
-          className="rounded-md border border-zinc-200 px-2 py-1 text-xs text-zinc-600 transition-colors hover:bg-zinc-100 md:hidden dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
-        >
-          专家 / 文档
-        </button>
-        <div className="flex items-center gap-2">
-          <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-zinc-100 text-sm dark:bg-zinc-800" aria-hidden>
-            {activeAgent?.emoji || "🤖"}
-          </span>
-          <div className="leading-tight">
-            <h1 className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">
-              {activeAgent?.name ?? "通用助手"}
-            </h1>
-            <p className="text-[11px] text-zinc-400">
-              {activeAgent?.description || "Agent 多步检索 · 证据引用 · 流式输出"}
+    <div className="flex h-dvh w-full overflow-hidden bg-background text-foreground">
+      {/* 左侧栏 */}
+      <div
+        className={`${sidebarOpen ? "w-72" : "w-0"} shrink-0 overflow-hidden border-r border-border/60 transition-[width] duration-200 max-md:absolute max-md:z-40 max-md:h-full`}
+      >
+        <AppSidebar
+          agents={agents}
+          agentsLoading={agentsLoading}
+          activeAgentId={activeAgentId}
+          onSwitchAgent={switchAgent}
+          conversations={conversations}
+          currentId={currentId}
+          onSelectConversation={setCurrentId}
+          onNewChat={newChat}
+          onDeleteConversation={remove}
+          onRenameConversation={rename}
+          docs={docs}
+          docsLoading={docsLoading}
+          onUpload={upload}
+          onDeleteDoc={removeDoc}
+          onCreateAgent={handleCreateAgent}
+          onDeleteAgent={handleDeleteAgent}
+          activeAgent={activeAgent ?? undefined}
+        />
+      </div>
+
+      {/* 主区域 */}
+      <main className="flex min-w-0 flex-1 flex-col">
+        {/* 顶栏 */}
+        <header className="flex h-14 shrink-0 items-center gap-2 border-b border-border/60 px-4">
+          <button
+            type="button"
+            aria-label="折叠侧栏"
+            className="rounded-md p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground"
+            onClick={() => setSidebarOpen((v) => !v)}
+          >
+            ☰
+          </button>
+          <div className="min-w-0">
+            <p className="truncate text-sm font-medium leading-tight">
+              {activeAgent?.name ?? "知识库问答"}
             </p>
+            {activeAgent?.description && (
+              <p className="truncate text-xs text-muted-foreground">{activeAgent.description}</p>
+            )}
           </div>
-        </div>
-      </header>
-
-      <div className="flex min-h-0 flex-1">
-        <div className="hidden w-[280px] shrink-0 md:block">
-          <DocSidebar
-            agents={agents}
-            activeAgentId={activeAgentId}
-            docs={docs}
-            docsLoading={docsLoading}
-            onRefreshDocs={refreshDocs}
-            onRefreshAgents={refreshAgents}
-            onSelectAgent={selectAgent}
-          />
-        </div>
-
-        {drawerOpen && (
-          <div className="fixed inset-0 z-20 flex md:hidden">
-            <div className="w-[280px]">
-              <DocSidebar
-                agents={agents}
-                activeAgentId={activeAgentId}
-                docs={docs}
-                docsLoading={docsLoading}
-                onRefreshDocs={refreshDocs}
-                onRefreshAgents={refreshAgents}
-                onSelectAgent={selectAgent}
-              />
+          <div className="ml-auto flex items-center gap-2">
+            <div className="flex rounded-lg border border-border/60 p-0.5" role="group" aria-label="交互模式">
+              <button
+                type="button"
+                aria-pressed={mode === "agent"}
+                className={`rounded-md px-2.5 py-1 text-xs font-medium transition-colors ${mode === "agent" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}
+                onClick={() => setMode("agent")}
+              >
+                Agent
+              </button>
+              <button
+                type="button"
+                aria-pressed={mode === "fast"}
+                className={`rounded-md px-2.5 py-1 text-xs font-medium transition-colors ${mode === "fast" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}
+                onClick={() => setMode("fast")}
+              >
+                快速
+              </button>
             </div>
             <button
               type="button"
-              aria-label="关闭文档栏"
-              onClick={() => setDrawerOpen(false)}
-              className="flex-1 bg-black/30"
-            />
-          </div>
-        )}
-
-        <main className="flex min-h-0 min-w-0 flex-1 flex-col">
-          <div className="flex items-center gap-2 border-b border-zinc-100 bg-white/60 px-3 py-1.5 dark:border-zinc-800/60 dark:bg-zinc-950/40">
-            <label className="text-xs text-zinc-500">模式</label>
-            <select
-              value={mode}
-              onChange={(e) => setMode(e.target.value as ChatMode)}
-              disabled={running}
-              aria-label="选择问答模式"
-              data-testid="mode-select"
-              className="rounded-md border border-zinc-200 bg-white px-2 py-1 text-xs text-zinc-700 outline-none transition-colors focus:border-indigo-400 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-100"
+              aria-label="新建会话"
+              className="rounded-md p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground"
+              onClick={newChat}
             >
-              <option value="agent">Agent（多步检索）</option>
-              <option value="fast">快速问答</option>
-            </select>
+              ✚
+            </button>
+          </div>
+        </header>
+
+        {/* 消息区 */}
+        <div className="flex min-h-0 flex-1">
+          <div className="flex min-w-0 flex-1 flex-col">
+            <MessageList messages={messages} onJumpToSource={jumpToSource} />
+            <ChatInput disabled={false} running={running} onSend={send} onStop={stop} />
           </div>
 
-          <div
-            ref={scrollRef}
-            onScroll={handleScroll}
-            className="thin-scroll min-h-0 flex-1 overflow-y-auto px-3 py-4"
-          >
-            {messages.length === 0 ? (
-              <div className="mt-16 flex flex-col items-center gap-3 text-center">
-                <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-zinc-100 text-2xl shadow-sm dark:bg-zinc-800">
-                  {activeAgent?.emoji || "💬"}
-                </span>
-                {activeAgent?.greeting ? (
-                  <p className="max-w-md rounded-2xl rounded-tl-md bg-white px-4 py-3 text-sm leading-relaxed text-zinc-600 shadow-sm dark:bg-zinc-900 dark:text-zinc-300">
-                    {activeAgent.greeting}
-                  </p>
-                ) : (
-                  <p className="text-sm text-zinc-400">{emptyHint}</p>
-                )}
-                {noDocs && (
-                  <p className="max-w-md text-xs leading-relaxed text-zinc-400">
-                    没有知识库文档也能对话（回答基于一般知识）。
-                    {activeAgent?.name ?? "这位专家"}是严格模式时，无依据的问题会拒答——
-                    想让它回答自己的资料，先在左侧上传文档。
-                  </p>
-                )}
-              </div>
-            ) : (
-              <MessageList messages={messages} onJumpToSource={jumpToSource} />
-            )}
-            <div ref={bottomRef} />
-          </div>
+          {/* 证据侧栏 */}
+          {evidence && (() => {
+            const evidenceMessage = messages.find(
+              (m): m is ChatMessage & { role: "assistant" } => m.id === evidence.messageId && m.role === "assistant",
+            );
+            if (!evidenceMessage) return null;
+            return (
+              <aside className="hidden w-96 shrink-0 overflow-y-auto border-l border-border/60 lg:block">
+                <EvidencePanel
+                  message={evidenceMessage}
+                  index={evidence.index}
+                  agentId={activeAgentId}
+                  onClose={() => setEvidence(null)}
+                />
+              </aside>
+            );
+          })()}
+        </div>
+      </main>
 
-          <ChatInput disabled={false} running={running} onSend={send} onStop={stop} />
-        </main>
-      </div>
+      {/* 命令面板（自管 open 状态，⌘K 打开） */}
+      <CommandPalette
+        workspace
+        onNewConversation={newChat}
+        onNewAgent={() => setTokenOpen(true)}
+        onNavigate={(href) => {
+          if (typeof window !== "undefined") window.location.assign(href);
+        }}
+      />
+
+      {/* 管理员令牌对话框 */}
+      <AdminTokenDialog
+        open={tokenOpen}
+        onSave={() => {
+          setTokenOpen(false);
+          void refreshDocs();
+        }}
+        onCancel={() => setTokenOpen(false)}
+      />
     </div>
   );
 }

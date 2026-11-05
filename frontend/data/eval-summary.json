@@ -1,0 +1,1242 @@
+{
+  "generated_at": "2026-11-03 19:48:09",
+  "title": "Agent 评测报告",
+  "commit": "9d994b2",
+  "source": "run_eval",
+  "modes": {
+    "strict": {
+      "total": 36,
+      "errors": 0,
+      "retrieval_rate": 0.8888888888888888,
+      "answer_rate": 0.9166666666666666,
+      "citation_rate": 1.0,
+      "reject_rate": 1.0,
+      "pass_rate": 0.8055555555555556,
+      "avg_ratio": 0.5,
+      "numeric_consistency": 0.9642857142857143,
+      "faithfulness": null,
+      "latency_p50": 1500,
+      "latency_p95": 1500,
+      "avg_tokens": 1200,
+      "price_in": 0.0,
+      "price_out": 0.0,
+      "by_category": {
+        "compare": {
+          "n": 4,
+          "pass_rate": 0.25
+        },
+        "derived": {
+          "n": 1,
+          "pass_rate": 1.0
+        },
+        "fact": {
+          "n": 10,
+          "pass_rate": 1.0
+        },
+        "mixed": {
+          "n": 3,
+          "pass_rate": 0.0
+        },
+        "multi_hop": {
+          "n": 4,
+          "pass_rate": 0.75
+        },
+        "persona": {
+          "n": 1,
+          "pass_rate": 1.0
+        },
+        "precise": {
+          "n": 5,
+          "pass_rate": 1.0
+        },
+        "reject": {
+          "n": 8,
+          "pass_rate": 1.0
+        }
+      },
+      "cases": [
+        {
+          "id": "f1",
+          "question": "产品A的月费是多少？",
+          "category": "fact",
+          "mode": "strict",
+          "answer": "关键数字 30 [1]\n补充说明这一句是一般知识。",
+          "problems": [],
+          "grounded": true,
+          "steps": 2,
+          "sources": [
+            {
+              "index": 1,
+              "source": "产品A.txt",
+              "content": "关键数字 30"
+            }
+          ]
+        },
+        {
+          "id": "f2",
+          "question": "产品A最多支持多少个成员？",
+          "category": "fact",
+          "mode": "strict",
+          "answer": "关键数字 5 [1]\n补充说明这一句是一般知识。",
+          "problems": [],
+          "grounded": true,
+          "steps": 2,
+          "sources": [
+            {
+              "index": 1,
+              "source": "产品A.txt",
+              "content": "关键数字 5"
+            }
+          ]
+        },
+        {
+          "id": "f3",
+          "question": "产品B的存储空间有多大？",
+          "category": "fact",
+          "mode": "strict",
+          "answer": "关键数字 500 [1]\n补充说明这一句是一般知识。",
+          "problems": [],
+          "grounded": true,
+          "steps": 2,
+          "sources": [
+            {
+              "index": 1,
+              "source": "产品B.txt",
+              "content": "关键数字 500"
+            }
+          ]
+        },
+        {
+          "id": "f4",
+          "question": "产品A超出成员数要怎么加购？",
+          "category": "fact",
+          "mode": "strict",
+          "answer": "关键数字 10 [1]\n补充说明这一句是一般知识。",
+          "problems": [],
+          "grounded": true,
+          "steps": 2,
+          "sources": [
+            {
+              "index": 1,
+              "source": "产品A.txt",
+              "content": "关键数字 10"
+            }
+          ]
+        },
+        {
+          "id": "f5",
+          "question": "产品B支持按月退订吗？",
+          "category": "fact",
+          "mode": "strict",
+          "answer": "关键数字 不支持 [1]\n补充说明这一句是一般知识。",
+          "problems": [],
+          "grounded": true,
+          "steps": 2,
+          "sources": [
+            {
+              "index": 1,
+              "source": "产品B.txt",
+              "content": "关键数字 不支持"
+            }
+          ]
+        },
+        {
+          "id": "c1",
+          "question": "产品A和产品B的月费分别是多少？",
+          "category": "compare",
+          "mode": "strict",
+          "answer": "关键数字 30 [1]\n补充说明这一句是一般知识。",
+          "problems": [],
+          "grounded": true,
+          "steps": 2,
+          "sources": [
+            {
+              "index": 1,
+              "source": "产品A.txt",
+              "content": "关键数字 30"
+            }
+          ]
+        },
+        {
+          "id": "c2",
+          "question": "产品B有哪些产品A没有的功能？",
+          "category": "compare",
+          "mode": "strict",
+          "answer": "关键数字 审计日志 [1]\n补充说明这一句是一般知识。",
+          "problems": [],
+          "grounded": true,
+          "steps": 2,
+          "sources": [
+            {
+              "index": 1,
+              "source": "产品B.txt",
+              "content": "关键数字 审计日志"
+            }
+          ]
+        },
+        {
+          "id": "c3",
+          "question": "产品B和产品E哪个支持的成员更多？",
+          "category": "compare",
+          "mode": "strict",
+          "answer": "关键数字 100 [1]\n补充说明这一句是一般知识。",
+          "problems": [],
+          "grounded": true,
+          "steps": 2,
+          "sources": [
+            {
+              "index": 1,
+              "source": "产品A.txt",
+              "content": "关键数字 100"
+            }
+          ]
+        },
+        {
+          "id": "p1",
+          "question": "配置 6145 对应哪个产品的推送任务？",
+          "category": "precise",
+          "mode": "strict",
+          "answer": "配置号命中 产品 A [1]\n补充说明这一句是一般知识。",
+          "problems": [],
+          "grounded": true,
+          "steps": 2,
+          "sources": [
+            {
+              "index": 1,
+              "source": "推送配置清单.txt",
+              "content": "关键数字 产品 A"
+            }
+          ]
+        },
+        {
+          "id": "p2",
+          "question": "配置 6152 的负责人是谁？",
+          "category": "precise",
+          "mode": "strict",
+          "answer": "配置号命中 lisi [1]\n补充说明这一句是一般知识。",
+          "problems": [],
+          "grounded": true,
+          "steps": 2,
+          "sources": [
+            {
+              "index": 1,
+              "source": "推送配置清单.txt",
+              "content": "关键数字 lisi"
+            }
+          ]
+        },
+        {
+          "id": "p3",
+          "question": "GB1001 这个型号的标准容量是多少？",
+          "category": "precise",
+          "mode": "strict",
+          "answer": "配置号命中 500 [1]\n补充说明这一句是一般知识。",
+          "problems": [],
+          "grounded": true,
+          "steps": 2,
+          "sources": [
+            {
+              "index": 1,
+              "source": "规格型号.txt",
+              "content": "关键数字 500"
+            }
+          ]
+        },
+        {
+          "id": "p4",
+          "question": "GB2006 这个型号有什么限制？",
+          "category": "precise",
+          "mode": "strict",
+          "answer": "配置号命中 夜间 [1]\n补充说明这一句是一般知识。",
+          "problems": [],
+          "grounded": true,
+          "steps": 2,
+          "sources": [
+            {
+              "index": 1,
+              "source": "规格型号.txt",
+              "content": "关键数字 夜间"
+            }
+          ]
+        },
+        {
+          "id": "p5",
+          "question": "配置 6202 什么时候执行？",
+          "category": "precise",
+          "mode": "strict",
+          "answer": "配置号命中 周五 [1]\n补充说明这一句是一般知识。",
+          "problems": [],
+          "grounded": true,
+          "steps": 2,
+          "sources": [
+            {
+              "index": 1,
+              "source": "推送配置清单.txt",
+              "content": "关键数字 周五"
+            }
+          ]
+        },
+        {
+          "id": "m1",
+          "question": "如果团队有10个人，产品A需要额外付多少成员费？",
+          "category": "multi_hop",
+          "mode": "strict",
+          "answer": "关键数字 50 [1]\n补充说明这一句是一般知识。",
+          "problems": [],
+          "grounded": true,
+          "steps": 2,
+          "sources": [
+            {
+              "index": 1,
+              "source": "产品A.txt",
+              "content": "关键数字 50"
+            }
+          ]
+        },
+        {
+          "id": "m2",
+          "question": "预算50元以内且必须支持单点登录，应该选哪个产品？",
+          "category": "multi_hop",
+          "mode": "strict",
+          "answer": "关键数字 产品 B [1]\n补充说明这一句是一般知识。",
+          "problems": [],
+          "grounded": true,
+          "steps": 2,
+          "sources": [
+            {
+              "index": 1,
+              "source": "产品A.txt",
+              "content": "关键数字 产品 B"
+            }
+          ]
+        },
+        {
+          "id": "m3",
+          "question": "产品A的默认推送任务配置号和负责人分别是什么？",
+          "category": "multi_hop",
+          "mode": "strict",
+          "answer": "关键数字 6145 [1]\n补充说明这一句是一般知识。",
+          "problems": [],
+          "grounded": true,
+          "steps": 2,
+          "sources": [
+            {
+              "index": 1,
+              "source": "推送配置清单.txt",
+              "content": "关键数字 6145"
+            }
+          ]
+        },
+        {
+          "id": "r1",
+          "question": "量子纠缠在生物体内的作用机制是什么？",
+          "category": "reject",
+          "mode": "strict",
+          "answer": "文档中未找到相关信息。",
+          "problems": [],
+          "grounded": true,
+          "steps": 2,
+          "sources": []
+        },
+        {
+          "id": "r2",
+          "question": "今天北京的天气怎么样？",
+          "category": "reject",
+          "mode": "strict",
+          "answer": "文档中未找到相关信息。",
+          "problems": [],
+          "grounded": true,
+          "steps": 2,
+          "sources": []
+        },
+        {
+          "id": "r3",
+          "question": "产品C的月费是多少？",
+          "category": "reject",
+          "mode": "strict",
+          "answer": "文档中未找到相关信息。",
+          "problems": [],
+          "grounded": true,
+          "steps": 2,
+          "sources": []
+        },
+        {
+          "id": "r4",
+          "question": "配置 9999 是谁负责的？",
+          "category": "reject",
+          "mode": "strict",
+          "answer": "文档中未找到相关信息。",
+          "problems": [],
+          "grounded": true,
+          "steps": 2,
+          "sources": []
+        },
+        {
+          "id": "r5",
+          "question": "请介绍一下贵公司的组织架构和员工人数。",
+          "category": "reject",
+          "mode": "strict",
+          "answer": "文档中未找到相关信息。",
+          "problems": [],
+          "grounded": true,
+          "steps": 2,
+          "sources": []
+        },
+        {
+          "id": "ft1",
+          "question": "新手每周练几次比较合适？",
+          "category": "fact",
+          "mode": "strict",
+          "answer": "关键数字 3 [1]\n补充说明这一句是一般知识。",
+          "problems": [],
+          "grounded": true,
+          "steps": 2,
+          "sources": [
+            {
+              "index": 1,
+              "source": "新手训练计划.txt",
+              "content": "关键数字 3"
+            }
+          ]
+        },
+        {
+          "id": "ft2",
+          "question": "力量训练的人每天每公斤体重需要多少蛋白质？",
+          "category": "fact",
+          "mode": "strict",
+          "answer": "关键数字 1.6 [1]\n补充说明这一句是一般知识。",
+          "problems": [],
+          "grounded": true,
+          "steps": 2,
+          "sources": [
+            {
+              "index": 1,
+              "source": "饮食营养基础.txt",
+              "content": "关键数字 1.6"
+            }
+          ]
+        },
+        {
+          "id": "ft3",
+          "question": "轻松跑的心率应控制在最大心率的多少？",
+          "category": "fact",
+          "mode": "strict",
+          "answer": "关键数字 60 [1]\n补充说明这一句是一般知识。",
+          "problems": [],
+          "grounded": true,
+          "steps": 2,
+          "sources": [
+            {
+              "index": 1,
+              "source": "跑步入门.txt",
+              "content": "关键数字 60"
+            }
+          ]
+        },
+        {
+          "id": "ft4",
+          "question": "平板支撑新手从多少秒开始练？",
+          "category": "fact",
+          "mode": "strict",
+          "answer": "关键数字 20 [1]\n补充说明这一句是一般知识。",
+          "problems": [],
+          "grounded": true,
+          "steps": 2,
+          "sources": [
+            {
+              "index": 1,
+              "source": "产品A.txt",
+              "content": "关键数字 20"
+            }
+          ]
+        },
+        {
+          "id": "ft5",
+          "question": "每天应该睡多久才有利于肌肉恢复？",
+          "category": "fact",
+          "mode": "strict",
+          "answer": "关键数字 7 [1]\n补充说明这一句是一般知识。",
+          "problems": [],
+          "grounded": true,
+          "steps": 2,
+          "sources": [
+            {
+              "index": 1,
+              "source": "新手训练计划.txt",
+              "content": "关键数字 7"
+            }
+          ]
+        },
+        {
+          "id": "fc1",
+          "question": "新手力量训练每组做几次？跑步入门前两周每次快走多久？",
+          "category": "compare",
+          "mode": "strict",
+          "answer": "关键数字 8-12 [1]\n补充说明这一句是一般知识。",
+          "problems": [],
+          "grounded": true,
+          "steps": 2,
+          "sources": [
+            {
+              "index": 1,
+              "source": "产品A.txt",
+              "content": "关键数字 8-12"
+            }
+          ]
+        },
+        {
+          "id": "fm1",
+          "question": "我 70 公斤，按知识库的建议每天大概要吃多少克蛋白质？",
+          "category": "multi_hop",
+          "mode": "strict",
+          "answer": "关键数字 112 [1]\n补充说明这一句是一般知识。",
+          "problems": [],
+          "grounded": true,
+          "steps": 2,
+          "sources": [
+            {
+              "index": 1,
+              "source": "产品A.txt",
+              "content": "关键数字 112"
+            }
+          ]
+        },
+        {
+          "id": "fd1",
+          "question": "我 30 岁，轻松跑的心率大概在什么区间？",
+          "category": "derived",
+          "mode": "strict",
+          "answer": "关键数字 114 [1]\n补充说明这一句是一般知识。",
+          "problems": [],
+          "grounded": true,
+          "steps": 2,
+          "sources": [
+            {
+              "index": 1,
+              "source": "产品A.txt",
+              "content": "关键数字 114"
+            }
+          ]
+        },
+        {
+          "id": "fx1",
+          "question": "增肌期间每天要吃多少蛋白质？另外肌酸有什么作用？",
+          "category": "mixed",
+          "mode": "strict",
+          "answer": "关键数字 1.6 [1]\n补充说明这一句是一般知识。",
+          "problems": [],
+          "grounded": true,
+          "steps": 2,
+          "sources": [
+            {
+              "index": 1,
+              "source": "产品A.txt",
+              "content": "关键数字 1.6"
+            }
+          ]
+        },
+        {
+          "id": "fp1",
+          "question": "我跑步的时候膝盖疼，还能继续练吗？",
+          "category": "persona",
+          "mode": "strict",
+          "answer": "关键数字 就医 [1]\n补充说明这一句是一般知识。",
+          "problems": [],
+          "grounded": true,
+          "steps": 2,
+          "sources": [
+            {
+              "index": 1,
+              "source": "产品A.txt",
+              "content": "关键数字 就医"
+            }
+          ]
+        },
+        {
+          "id": "fr1",
+          "question": "瑜伽的拜日式具体怎么做？",
+          "category": "reject",
+          "mode": "strict",
+          "answer": "文档中未找到相关信息。",
+          "problems": [],
+          "grounded": true,
+          "steps": 2,
+          "sources": []
+        },
+        {
+          "id": "fr2",
+          "question": "体脂秤测出来的体脂率准吗？",
+          "category": "reject",
+          "mode": "strict",
+          "answer": "文档中未找到相关信息。",
+          "problems": [],
+          "grounded": true,
+          "steps": 2,
+          "sources": []
+        },
+        {
+          "id": "fr3",
+          "question": "游泳换气有什么技巧？",
+          "category": "reject",
+          "mode": "strict",
+          "answer": "文档中未找到相关信息。",
+          "problems": [],
+          "grounded": true,
+          "steps": 2,
+          "sources": []
+        },
+        {
+          "id": "x1",
+          "question": "产品A的月费是多少？SaaS 订阅一般怎么计费？",
+          "category": "mixed",
+          "mode": "strict",
+          "answer": "关键数字 30 [1]\n补充说明这一句是一般知识。",
+          "problems": [],
+          "grounded": true,
+          "steps": 2,
+          "sources": [
+            {
+              "index": 1,
+              "source": "产品A.txt",
+              "content": "关键数字 30"
+            }
+          ]
+        },
+        {
+          "id": "x2",
+          "question": "产品B支持按月退订吗？退订一般有哪些注意事项？",
+          "category": "mixed",
+          "mode": "strict",
+          "answer": "关键数字 不支持 [1]\n补充说明这一句是一般知识。",
+          "problems": [],
+          "grounded": true,
+          "steps": 2,
+          "sources": [
+            {
+              "index": 1,
+              "source": "产品B.txt",
+              "content": "关键数字 不支持"
+            }
+          ]
+        }
+      ]
+    },
+    "reference": {
+      "total": 36,
+      "errors": 0,
+      "retrieval_rate": 0.8888888888888888,
+      "answer_rate": 1.0,
+      "citation_rate": 1.0,
+      "reject_rate": 1.0,
+      "pass_rate": 0.8888888888888888,
+      "avg_ratio": 0.3888888888888889,
+      "numeric_consistency": 0.9642857142857143,
+      "faithfulness": null,
+      "latency_p50": 1500,
+      "latency_p95": 1500,
+      "avg_tokens": 1200,
+      "price_in": 0.0,
+      "price_out": 0.0,
+      "by_category": {
+        "compare": {
+          "n": 4,
+          "pass_rate": 0.25
+        },
+        "derived": {
+          "n": 1,
+          "pass_rate": 1.0
+        },
+        "fact": {
+          "n": 10,
+          "pass_rate": 1.0
+        },
+        "mixed": {
+          "n": 3,
+          "pass_rate": 1.0
+        },
+        "multi_hop": {
+          "n": 4,
+          "pass_rate": 0.75
+        },
+        "persona": {
+          "n": 1,
+          "pass_rate": 1.0
+        },
+        "precise": {
+          "n": 5,
+          "pass_rate": 1.0
+        },
+        "reject": {
+          "n": 8,
+          "pass_rate": 1.0
+        }
+      },
+      "cases": [
+        {
+          "id": "f1",
+          "question": "产品A的月费是多少？",
+          "category": "fact",
+          "mode": "reference",
+          "answer": "关键数字 30 [1]\n补充说明这一句是一般知识。",
+          "problems": [],
+          "grounded": true,
+          "steps": 2,
+          "sources": [
+            {
+              "index": 1,
+              "source": "产品A.txt",
+              "content": "关键数字 30"
+            }
+          ]
+        },
+        {
+          "id": "f2",
+          "question": "产品A最多支持多少个成员？",
+          "category": "fact",
+          "mode": "reference",
+          "answer": "关键数字 5 [1]\n补充说明这一句是一般知识。",
+          "problems": [],
+          "grounded": true,
+          "steps": 2,
+          "sources": [
+            {
+              "index": 1,
+              "source": "产品A.txt",
+              "content": "关键数字 5"
+            }
+          ]
+        },
+        {
+          "id": "f3",
+          "question": "产品B的存储空间有多大？",
+          "category": "fact",
+          "mode": "reference",
+          "answer": "关键数字 500 [1]\n补充说明这一句是一般知识。",
+          "problems": [],
+          "grounded": true,
+          "steps": 2,
+          "sources": [
+            {
+              "index": 1,
+              "source": "产品B.txt",
+              "content": "关键数字 500"
+            }
+          ]
+        },
+        {
+          "id": "f4",
+          "question": "产品A超出成员数要怎么加购？",
+          "category": "fact",
+          "mode": "reference",
+          "answer": "关键数字 10 [1]\n补充说明这一句是一般知识。",
+          "problems": [],
+          "grounded": true,
+          "steps": 2,
+          "sources": [
+            {
+              "index": 1,
+              "source": "产品A.txt",
+              "content": "关键数字 10"
+            }
+          ]
+        },
+        {
+          "id": "f5",
+          "question": "产品B支持按月退订吗？",
+          "category": "fact",
+          "mode": "reference",
+          "answer": "关键数字 不支持 [1]\n补充说明这一句是一般知识。",
+          "problems": [],
+          "grounded": true,
+          "steps": 2,
+          "sources": [
+            {
+              "index": 1,
+              "source": "产品B.txt",
+              "content": "关键数字 不支持"
+            }
+          ]
+        },
+        {
+          "id": "c1",
+          "question": "产品A和产品B的月费分别是多少？",
+          "category": "compare",
+          "mode": "reference",
+          "answer": "关键数字 30 [1]\n补充说明这一句是一般知识。",
+          "problems": [],
+          "grounded": true,
+          "steps": 2,
+          "sources": [
+            {
+              "index": 1,
+              "source": "产品A.txt",
+              "content": "关键数字 30"
+            }
+          ]
+        },
+        {
+          "id": "c2",
+          "question": "产品B有哪些产品A没有的功能？",
+          "category": "compare",
+          "mode": "reference",
+          "answer": "关键数字 审计日志 [1]\n补充说明这一句是一般知识。",
+          "problems": [],
+          "grounded": true,
+          "steps": 2,
+          "sources": [
+            {
+              "index": 1,
+              "source": "产品B.txt",
+              "content": "关键数字 审计日志"
+            }
+          ]
+        },
+        {
+          "id": "c3",
+          "question": "产品B和产品E哪个支持的成员更多？",
+          "category": "compare",
+          "mode": "reference",
+          "answer": "关键数字 100 [1]\n补充说明这一句是一般知识。",
+          "problems": [],
+          "grounded": true,
+          "steps": 2,
+          "sources": [
+            {
+              "index": 1,
+              "source": "产品A.txt",
+              "content": "关键数字 100"
+            }
+          ]
+        },
+        {
+          "id": "p1",
+          "question": "配置 6145 对应哪个产品的推送任务？",
+          "category": "precise",
+          "mode": "reference",
+          "answer": "配置号命中 产品 A [1]\n补充说明这一句是一般知识。",
+          "problems": [],
+          "grounded": true,
+          "steps": 2,
+          "sources": [
+            {
+              "index": 1,
+              "source": "推送配置清单.txt",
+              "content": "关键数字 产品 A"
+            }
+          ]
+        },
+        {
+          "id": "p2",
+          "question": "配置 6152 的负责人是谁？",
+          "category": "precise",
+          "mode": "reference",
+          "answer": "配置号命中 lisi [1]\n补充说明这一句是一般知识。",
+          "problems": [],
+          "grounded": true,
+          "steps": 2,
+          "sources": [
+            {
+              "index": 1,
+              "source": "推送配置清单.txt",
+              "content": "关键数字 lisi"
+            }
+          ]
+        },
+        {
+          "id": "p3",
+          "question": "GB1001 这个型号的标准容量是多少？",
+          "category": "precise",
+          "mode": "reference",
+          "answer": "配置号命中 500 [1]\n补充说明这一句是一般知识。",
+          "problems": [],
+          "grounded": true,
+          "steps": 2,
+          "sources": [
+            {
+              "index": 1,
+              "source": "规格型号.txt",
+              "content": "关键数字 500"
+            }
+          ]
+        },
+        {
+          "id": "p4",
+          "question": "GB2006 这个型号有什么限制？",
+          "category": "precise",
+          "mode": "reference",
+          "answer": "配置号命中 夜间 [1]\n补充说明这一句是一般知识。",
+          "problems": [],
+          "grounded": true,
+          "steps": 2,
+          "sources": [
+            {
+              "index": 1,
+              "source": "规格型号.txt",
+              "content": "关键数字 夜间"
+            }
+          ]
+        },
+        {
+          "id": "p5",
+          "question": "配置 6202 什么时候执行？",
+          "category": "precise",
+          "mode": "reference",
+          "answer": "配置号命中 周五 [1]\n补充说明这一句是一般知识。",
+          "problems": [],
+          "grounded": true,
+          "steps": 2,
+          "sources": [
+            {
+              "index": 1,
+              "source": "推送配置清单.txt",
+              "content": "关键数字 周五"
+            }
+          ]
+        },
+        {
+          "id": "m1",
+          "question": "如果团队有10个人，产品A需要额外付多少成员费？",
+          "category": "multi_hop",
+          "mode": "reference",
+          "answer": "关键数字 50 [1]\n补充说明这一句是一般知识。",
+          "problems": [],
+          "grounded": true,
+          "steps": 2,
+          "sources": [
+            {
+              "index": 1,
+              "source": "产品A.txt",
+              "content": "关键数字 50"
+            }
+          ]
+        },
+        {
+          "id": "m2",
+          "question": "预算50元以内且必须支持单点登录，应该选哪个产品？",
+          "category": "multi_hop",
+          "mode": "reference",
+          "answer": "关键数字 产品 B [1]\n补充说明这一句是一般知识。",
+          "problems": [],
+          "grounded": true,
+          "steps": 2,
+          "sources": [
+            {
+              "index": 1,
+              "source": "产品A.txt",
+              "content": "关键数字 产品 B"
+            }
+          ]
+        },
+        {
+          "id": "m3",
+          "question": "产品A的默认推送任务配置号和负责人分别是什么？",
+          "category": "multi_hop",
+          "mode": "reference",
+          "answer": "关键数字 6145 [1]\n补充说明这一句是一般知识。",
+          "problems": [],
+          "grounded": true,
+          "steps": 2,
+          "sources": [
+            {
+              "index": 1,
+              "source": "推送配置清单.txt",
+              "content": "关键数字 6145"
+            }
+          ]
+        },
+        {
+          "id": "r1",
+          "question": "量子纠缠在生物体内的作用机制是什么？",
+          "category": "reject",
+          "mode": "reference",
+          "answer": "知识库中暂无相关资料，以下回答基于一般知识，仅供参考。\n\n这个我知识库里没有。",
+          "problems": [],
+          "grounded": false,
+          "steps": 2,
+          "sources": []
+        },
+        {
+          "id": "r2",
+          "question": "今天北京的天气怎么样？",
+          "category": "reject",
+          "mode": "reference",
+          "answer": "知识库中暂无相关资料，以下回答基于一般知识，仅供参考。\n\n这个我知识库里没有。",
+          "problems": [],
+          "grounded": false,
+          "steps": 2,
+          "sources": []
+        },
+        {
+          "id": "r3",
+          "question": "产品C的月费是多少？",
+          "category": "reject",
+          "mode": "reference",
+          "answer": "知识库中暂无相关资料，以下回答基于一般知识，仅供参考。\n\n这个我知识库里没有。",
+          "problems": [],
+          "grounded": false,
+          "steps": 2,
+          "sources": []
+        },
+        {
+          "id": "r4",
+          "question": "配置 9999 是谁负责的？",
+          "category": "reject",
+          "mode": "reference",
+          "answer": "知识库中暂无相关资料，以下回答基于一般知识，仅供参考。\n\n这个我知识库里没有。",
+          "problems": [],
+          "grounded": false,
+          "steps": 2,
+          "sources": []
+        },
+        {
+          "id": "r5",
+          "question": "请介绍一下贵公司的组织架构和员工人数。",
+          "category": "reject",
+          "mode": "reference",
+          "answer": "知识库中暂无相关资料，以下回答基于一般知识，仅供参考。\n\n这个我知识库里没有。",
+          "problems": [],
+          "grounded": false,
+          "steps": 2,
+          "sources": []
+        },
+        {
+          "id": "ft1",
+          "question": "新手每周练几次比较合适？",
+          "category": "fact",
+          "mode": "reference",
+          "answer": "关键数字 3 [1]\n补充说明这一句是一般知识。",
+          "problems": [],
+          "grounded": true,
+          "steps": 2,
+          "sources": [
+            {
+              "index": 1,
+              "source": "新手训练计划.txt",
+              "content": "关键数字 3"
+            }
+          ]
+        },
+        {
+          "id": "ft2",
+          "question": "力量训练的人每天每公斤体重需要多少蛋白质？",
+          "category": "fact",
+          "mode": "reference",
+          "answer": "关键数字 1.6 [1]\n补充说明这一句是一般知识。",
+          "problems": [],
+          "grounded": true,
+          "steps": 2,
+          "sources": [
+            {
+              "index": 1,
+              "source": "饮食营养基础.txt",
+              "content": "关键数字 1.6"
+            }
+          ]
+        },
+        {
+          "id": "ft3",
+          "question": "轻松跑的心率应控制在最大心率的多少？",
+          "category": "fact",
+          "mode": "reference",
+          "answer": "关键数字 60 [1]\n补充说明这一句是一般知识。",
+          "problems": [],
+          "grounded": true,
+          "steps": 2,
+          "sources": [
+            {
+              "index": 1,
+              "source": "跑步入门.txt",
+              "content": "关键数字 60"
+            }
+          ]
+        },
+        {
+          "id": "ft4",
+          "question": "平板支撑新手从多少秒开始练？",
+          "category": "fact",
+          "mode": "reference",
+          "answer": "关键数字 20 [1]\n补充说明这一句是一般知识。",
+          "problems": [],
+          "grounded": true,
+          "steps": 2,
+          "sources": [
+            {
+              "index": 1,
+              "source": "产品A.txt",
+              "content": "关键数字 20"
+            }
+          ]
+        },
+        {
+          "id": "ft5",
+          "question": "每天应该睡多久才有利于肌肉恢复？",
+          "category": "fact",
+          "mode": "reference",
+          "answer": "关键数字 7 [1]\n补充说明这一句是一般知识。",
+          "problems": [],
+          "grounded": true,
+          "steps": 2,
+          "sources": [
+            {
+              "index": 1,
+              "source": "新手训练计划.txt",
+              "content": "关键数字 7"
+            }
+          ]
+        },
+        {
+          "id": "fc1",
+          "question": "新手力量训练每组做几次？跑步入门前两周每次快走多久？",
+          "category": "compare",
+          "mode": "reference",
+          "answer": "关键数字 8-12 [1]\n补充说明这一句是一般知识。",
+          "problems": [],
+          "grounded": true,
+          "steps": 2,
+          "sources": [
+            {
+              "index": 1,
+              "source": "产品A.txt",
+              "content": "关键数字 8-12"
+            }
+          ]
+        },
+        {
+          "id": "fm1",
+          "question": "我 70 公斤，按知识库的建议每天大概要吃多少克蛋白质？",
+          "category": "multi_hop",
+          "mode": "reference",
+          "answer": "关键数字 112 [1]\n补充说明这一句是一般知识。",
+          "problems": [],
+          "grounded": true,
+          "steps": 2,
+          "sources": [
+            {
+              "index": 1,
+              "source": "产品A.txt",
+              "content": "关键数字 112"
+            }
+          ]
+        },
+        {
+          "id": "fd1",
+          "question": "我 30 岁，轻松跑的心率大概在什么区间？",
+          "category": "derived",
+          "mode": "reference",
+          "answer": "关键数字 114 [1]\n补充说明这一句是一般知识。",
+          "problems": [],
+          "grounded": true,
+          "steps": 2,
+          "sources": [
+            {
+              "index": 1,
+              "source": "产品A.txt",
+              "content": "关键数字 114"
+            }
+          ]
+        },
+        {
+          "id": "fx1",
+          "question": "增肌期间每天要吃多少蛋白质？另外肌酸有什么作用？",
+          "category": "mixed",
+          "mode": "reference",
+          "answer": "关键数字 1.6 [1]\n补充说明这一句是一般知识。",
+          "problems": [],
+          "grounded": true,
+          "steps": 2,
+          "sources": [
+            {
+              "index": 1,
+              "source": "产品A.txt",
+              "content": "关键数字 1.6"
+            }
+          ]
+        },
+        {
+          "id": "fp1",
+          "question": "我跑步的时候膝盖疼，还能继续练吗？",
+          "category": "persona",
+          "mode": "reference",
+          "answer": "关键数字 就医 [1]\n补充说明这一句是一般知识。",
+          "problems": [],
+          "grounded": true,
+          "steps": 2,
+          "sources": [
+            {
+              "index": 1,
+              "source": "产品A.txt",
+              "content": "关键数字 就医"
+            }
+          ]
+        },
+        {
+          "id": "fr1",
+          "question": "瑜伽的拜日式具体怎么做？",
+          "category": "reject",
+          "mode": "reference",
+          "answer": "知识库中暂无相关资料，以下回答基于一般知识，仅供参考。\n\n这个我知识库里没有。",
+          "problems": [],
+          "grounded": false,
+          "steps": 2,
+          "sources": []
+        },
+        {
+          "id": "fr2",
+          "question": "体脂秤测出来的体脂率准吗？",
+          "category": "reject",
+          "mode": "reference",
+          "answer": "知识库中暂无相关资料，以下回答基于一般知识，仅供参考。\n\n这个我知识库里没有。",
+          "problems": [],
+          "grounded": false,
+          "steps": 2,
+          "sources": []
+        },
+        {
+          "id": "fr3",
+          "question": "游泳换气有什么技巧？",
+          "category": "reject",
+          "mode": "reference",
+          "answer": "知识库中暂无相关资料，以下回答基于一般知识，仅供参考。\n\n这个我知识库里没有。",
+          "problems": [],
+          "grounded": false,
+          "steps": 2,
+          "sources": []
+        },
+        {
+          "id": "x1",
+          "question": "产品A的月费是多少？SaaS 订阅一般怎么计费？",
+          "category": "mixed",
+          "mode": "reference",
+          "answer": "关键数字 30 [1]\n补充说明这一句是一般知识。",
+          "problems": [],
+          "grounded": true,
+          "steps": 2,
+          "sources": [
+            {
+              "index": 1,
+              "source": "产品A.txt",
+              "content": "关键数字 30"
+            }
+          ]
+        },
+        {
+          "id": "x2",
+          "question": "产品B支持按月退订吗？退订一般有哪些注意事项？",
+          "category": "mixed",
+          "mode": "reference",
+          "answer": "关键数字 不支持 [1]\n补充说明这一句是一般知识。",
+          "problems": [],
+          "grounded": true,
+          "steps": 2,
+          "sources": [
+            {
+              "index": 1,
+              "source": "产品B.txt",
+              "content": "关键数字 不支持"
+            }
+          ]
+        }
+      ]
+    }
+  }
+}
