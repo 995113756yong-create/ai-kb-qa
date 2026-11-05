@@ -24,6 +24,13 @@ function toolIcon(name: string): string {
   return "🛠";
 }
 
+const INTENT_LABELS: Record<string, string> = {
+  chat: "闲聊，直接回复",
+  list_docs: "查看文档清单",
+  kb_query: "需要查知识库，先预检索",
+  uncertain: "交给模型判断",
+};
+
 function formatArgs(args: Record<string, unknown>): string {
   const entries = Object.entries(args).filter(([, v]) => v !== undefined && v !== null);
   if (entries.length === 0) {
@@ -69,6 +76,13 @@ export default function AgentTrace({ steps, running, elapsedMs, defaultOpen }: P
       {open && (
         <ol className="flex flex-col gap-1 border-t border-zinc-200/60 px-2.5 py-2 dark:border-zinc-800/60" data-testid="trace-steps">
           {steps.map((step) => {
+            if (step.kind === "intent") {
+              return (
+                <li key={step.key} className="text-xs leading-relaxed text-amber-600 dark:text-amber-300">
+                  🧭 意图识别：{INTENT_LABELS[step.intent] ?? step.intent}（{step.reason}）
+                </li>
+              );
+            }
             if (step.kind === "decompose") {
               return (
                 <li key={step.key} className="text-xs leading-relaxed text-indigo-600 dark:text-indigo-300">

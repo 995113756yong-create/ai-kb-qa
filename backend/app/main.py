@@ -371,6 +371,7 @@ def create_app(
             persona=persona,
             agent_id=effective_agent_id,
             answer_mode=mode,
+            enable_intent=config.INTENT_ROUTING_ENABLED,
         )
         return StreamingResponse(
             stream_events(events, request.is_disconnected),

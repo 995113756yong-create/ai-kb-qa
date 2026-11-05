@@ -145,6 +145,14 @@ export default function ChatApp() {
         switch (event.type) {
           case "step":
             return message;
+          case "intent":
+            return {
+              ...message,
+              steps: [
+                ...message.steps,
+                { kind: "intent", key: `${id}-i`, intent: event.intent, reason: event.reason },
+              ],
+            };
           case "decompose":
             return {
               ...message,

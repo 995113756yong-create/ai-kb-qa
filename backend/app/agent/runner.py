@@ -11,6 +11,7 @@ from app.agent.attribution import Attribution, attribute
 from app.agent.evidence import EvidenceRegistry
 from app.agent.llm import AgentLLM, AssistantTurn, Usage
 from app.agent.prompts import (
+    CHAT_PROMPT,
     NO_EVIDENCE_ANSWER_PROMPT,
     RESEARCH_PROMPT_REFERENCE,
     RESEARCH_PROMPT_STRICT,
@@ -20,6 +21,7 @@ from app.agent.prompts import (
     with_persona,
 )
 from app.agent.query_rewrite import decompose_question, should_attempt_decompose
+from app.agent.intent import CHAT, KB_QUERY, LIST_DOCS, classify
 from app.qa import EMPTY_KB_ANSWER, NOT_FOUND_ANSWER
 from app.agent.tools import TOOL_SCHEMAS, execute_tool, summarize, to_text
 
@@ -204,6 +206,78 @@ def _answer_without_evidence(
     )
 
 
+def _answer_chat(
+    question: str,
+    llm: AgentLLM,
+    registry: EvidenceRegistry,
+    agent_id: str,
+    elapsed,
+    log_dir: Optional[str],
+    steps: List[dict],
+    mode: str = "reference",
+    persona: str = "",
+    meter: Optional[_UsageMeter] = None,
+):
+    """闲聊分流：不带工具、不检索，一次流式调用直接回复。"""
+    messages = [
+        {"role": "system", "content": with_persona(CHAT_PROMPT, persona)},
+        {"role": "user", "content": question},
+    ]
+    raw = ""
+    try:
+        for delta in llm.stream(messages):
+            raw += delta
+            yield {"type": "answer_delta", "text": delta}
+    except Exception as e:
+        logger.exception("闲聊回复失败")
+        yield {"type": "error", "detail": f"大模型调用失败：{type(e).__name__}"}
+        return
+    answer = raw.strip() or "你好，有什么可以帮你？"
+    used_ms = elapsed()
+    usage = meter.snapshot() if meter else None
+    yield final(answer, [], True, 0, used_ms, agent_id, mode=mode,
+                grounded_ratio=None, segments=[], usage=usage)
+    _write_run_log(log_dir, question, steps, registry, answer, True, used_ms,
+                   mode=mode, grounded_ratio=None, usage=usage, intent=CHAT)
+
+
+def _answer_list_docs(
+    question: str,
+    kb: KnowledgeBase,
+    registry: EvidenceRegistry,
+    agent_id: str,
+    elapsed,
+    log_dir: Optional[str],
+    steps: List[dict],
+    mode: str = "reference",
+    meter: Optional[_UsageMeter] = None,
+):
+    """列文档分流：直接调用 list_documents 工具，用模板拼回答，不调用大模型。"""
+    call_args = "{}"
+    yield {"type": "tool_call", "step": 0, "id": "intent-list", "name": "list_documents", "args": {}}
+    result = execute_tool("list_documents", call_args, kb, registry)
+    ok = "error" not in result
+    summary = summarize(result)
+    yield {"type": "tool_result", "step": 0, "id": "intent-list", "name": "list_documents",
+           "ok": ok, "summary": summary}
+    steps.append({"step": 0, "tool": "list_documents", "args": {}, "ok": ok, "summary": summary})
+
+    items = result.get("items") or []
+    if not items:
+        answer = "知识库目前是空的，还没有上传任何文档。"
+    else:
+        lines = [f"知识库中共有 {len(items)} 个文档："]
+        lines += [f"- {d['filename']}（{d['chunks']} 个片段）" for d in items]
+        answer = "\n".join(lines)
+    yield {"type": "answer_delta", "text": answer}
+    used_ms = elapsed()
+    usage = meter.snapshot() if meter else None
+    yield final(answer, [], True, 0, used_ms, agent_id, mode=mode,
+                grounded_ratio=None, segments=[], usage=usage)
+    _write_run_log(log_dir, question, steps, registry, answer, True, used_ms,
+                   mode=mode, grounded_ratio=None, usage=usage, intent=LIST_DOCS)
+
+
 def answer_messages(
     question: str,
     registry: EvidenceRegistry,
@@ -246,6 +320,7 @@ def run_agent(
     persona: str = "",
     agent_id: str = "",
     answer_mode: str = "reference",
+    enable_intent: bool = False,
 ) -> Iterator[dict]:
     """产出事件流的同步生成器，由 SSE 层包装成异步响应。
 
@@ -281,6 +356,19 @@ def run_agent(
     def elapsed() -> int:
         return int((time.monotonic() - started) * 1000)
 
+    intent = None
+    if enable_intent:
+        intent = classify(question)
+        yield {"type": "intent", "intent": intent.intent, "reason": intent.reason}
+        if intent.intent == CHAT:
+            yield from _answer_chat(question, llm, registry, agent_id, elapsed, log_dir, steps,
+                                    mode=answer_mode, persona=persona, meter=meter)
+            return
+        if intent.intent == LIST_DOCS:
+            yield from _answer_list_docs(question, kb, registry, agent_id, elapsed, log_dir, steps,
+                                         mode=answer_mode, meter=meter)
+            return
+
     if kb.is_empty:
         if answer_mode == "strict":
             # strict 模式：知识库为空就是没有依据，输出固定话术
@@ -299,6 +387,28 @@ def run_agent(
         return
 
     try:
+        if intent is not None and intent.intent == KB_QUERY:
+            call_id = "intent-1"
+            call_args = json.dumps({"query": question}, ensure_ascii=False)
+            yield {"type": "tool_call", "step": 0, "id": call_id, "name": "search_kb",
+                   "args": {"query": question}}
+            result = execute_tool("search_kb", call_args, kb, registry,
+                                  search_k=search_k, rerank_llm=effective_rerank_llm)
+            ok = "error" not in result
+            summary = summarize(result)
+            yield {"type": "tool_result", "step": 0, "id": call_id, "name": "search_kb",
+                   "ok": ok, "summary": summary}
+            steps.append({"step": 0, "tool": "search_kb", "args": {"query": question},
+                          "ok": ok, "summary": summary})
+            # 预检索结果交给模型作参考：模型能看到已查过什么，原样再查会被去重短路
+            seen_calls.add(f"search_kb:{canonical_json(call_args)}")
+            if ok:
+                messages.append({
+                    "role": "user",
+                    "content": "（系统已用原问题预先检索了一次，结果如下，可直接引用其中的证据编号；"
+                               "不够再换关键词检索。）\n" + to_text(result),
+                })
+
         if enable_decompose and should_attempt_decompose(question):
             sub_queries = decompose_question(effective_decompose_llm or llm, question)
             if len(sub_queries) > 1:
@@ -458,6 +568,7 @@ def _write_run_log(
     grounded_ratio: Optional[float] = None,
     numeric_warnings: int = 0,
     usage: Optional[dict] = None,
+    intent: str = "",
 ) -> None:
     """追加一行运行记录，供后续评测离线分析；写失败不影响响应。"""
     if not log_dir:
@@ -475,6 +586,8 @@ def _write_run_log(
         "numeric_warnings": numeric_warnings,
         "usage": usage,
     }
+    if intent:
+        record["intent"] = intent
     if error:
         record["error"] = error
     try:

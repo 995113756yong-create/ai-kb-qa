@@ -55,6 +55,11 @@ QUERY_DECOMPOSE_ENABLED = os.getenv("QUERY_DECOMPOSE_ENABLED", "false").lower() 
 # 较高、候选数较少时重排空间有限。保留实现与测试，作为可选特性。
 RERANK_ENABLED = os.getenv("RERANK_ENABLED", "false").lower() == "true"
 
+# 规则意图识别：进入 ReAct 循环前先用规则分流。
+# 闲聊直接回复、列文档直接调工具，都不走带工具的 LLM 决策；
+# 带编号实体或明说"文档里"的问题先用原问题检索一次；其余交给模型判断。
+INTENT_ROUTING_ENABLED = os.getenv("INTENT_ROUTING_ENABLED", "true").lower() == "true"
+
 # 多专家存储根目录：每个自定义专家一个子目录（uploads/faiss_index/logs）。
 # default 专家不进来，沿用上面的 UPLOAD_DIR / FAISS_DIR / AGENT_LOG_DIR。
 AGENTS_DIR = os.getenv("AGENTS_DIR", os.path.join(BACKEND_DIR, "agents_store"))
