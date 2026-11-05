@@ -48,8 +48,9 @@ def get_embeddings() -> Embeddings:
 
     return OpenAIEmbeddings(
         model=EMBEDDING_MODEL,
-        openai_api_key=OPENAI_API_KEY,
-        openai_api_base=OPENAI_API_BASE,
+        # 同上：运行时读 config，避免 from-import 绑定导致无法覆盖
+        openai_api_key=config.OPENAI_API_KEY,
+        openai_api_base=config.OPENAI_API_BASE,
         check_embedding_ctx_length=False,
         timeout=config.EMBEDDING_TIMEOUT_SECONDS,
         max_retries=config.LLM_MAX_RETRIES,
