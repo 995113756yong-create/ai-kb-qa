@@ -20,7 +20,6 @@ import { ask, listAgents, createAgent, deleteAgent } from "@/lib/api";
 import { useAgentRun } from "@/lib/useAgentRun";
 import { useConversations } from "@/lib/useConversations";
 import { useDocs } from "@/hooks/useDocs";
-import { useElapsed } from "@/hooks/useElapsed";
 import { useHotkeys, type HotkeyHandlers } from "@/hooks/useHotkeys";
 
 type Props = {
@@ -45,12 +44,24 @@ export default function ChatApp({ initialAgentId, initialConversationId }: Props
   const answerMode = activeAgent?.answer_mode ?? null;
 
   // ---------- Agent 列表 ----------
+  // setState 都在 await 之后，不在 effect 同步阶段触发级联渲染
   useEffect(() => {
-    setAgentsLoading(true);
-    listAgents()
-      .then((res) => setAgents(res.agents))
-      .catch(() => toast.error("加载专家列表失败"))
-      .finally(() => setAgentsLoading(false));
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await listAgents();
+        if (cancelled) return;
+        setAgents(res.agents);
+      } catch {
+        if (cancelled) return;
+        toast.error("加载专家列表失败");
+      } finally {
+        if (!cancelled) setAgentsLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   // ---------- 会话管理 ----------
@@ -65,7 +76,7 @@ export default function ChatApp({ initialAgentId, initialConversationId }: Props
     appendMessages,
     updateMessage,
     ensureTitle,
-  } = useConversations(activeAgentId);
+  } = useConversations(activeAgentId, initialConversationId);
 
   const messages = current?.messages ?? [];
 
@@ -150,12 +161,6 @@ export default function ChatApp({ initialAgentId, initialConversationId }: Props
     },
     [updateMessage],
   );
-
-  const [runStartedAt, setRunStartedAt] = useState<number | null>(null);
-  useEffect(() => {
-    setRunStartedAt(running ? Date.now() : null);
-  }, [running]);
-  const elapsed = useElapsed(runStartedAt);
 
   // ---------- 发送 ----------
   const send = useCallback(

@@ -10,7 +10,8 @@ export function useElapsed(runStartedAt: number | null): number {
 
   useEffect(() => {
     if (runStartedAt === null) return;
-    setNow(Date.now());
+    // 不在这里同步 setNow：interval 第一次回调在 100ms 后就会刷新，
+    // 同步补一次只为了让首帧准确，却会触发级联渲染（react-hooks/set-state-in-effect）。
     const timer = window.setInterval(() => setNow(Date.now()), 100);
     return () => window.clearInterval(timer);
   }, [runStartedAt]);

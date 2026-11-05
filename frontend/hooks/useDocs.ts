@@ -76,9 +76,27 @@ export function useDocs(agentId?: string): UseDocsResult {
     [agentId, refresh],
   );
 
+  // effect 里只触发异步加载，setState 都发生在 await 之后
+  // （react-hooks/set-state-in-effect 不允许 effect 同步阶段改状态）。
   useEffect(() => {
-    void refresh();
-  }, [refresh]);
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await listDocs(agentId);
+        if (cancelled) return;
+        setDocs(res.docs ?? []);
+        setError(null);
+      } catch (e) {
+        if (cancelled) return;
+        setError(e instanceof Error ? e.message : "加载文档失败");
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [agentId]);
 
   return { docs, loading, uploading, error, refresh, upload, remove };
 }

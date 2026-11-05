@@ -79,7 +79,7 @@ export function KnowledgePanel({
                       {doc.filename}
                     </p>
                     <p className="text-[11px] text-muted-foreground">
-                      {doc.chunks ?? 0} 片 · {formatBytes(doc.size ?? 0)} · {timeAgo(new Date(doc.uploaded_at ?? Date.now()).getTime())}
+                      {doc.chunks ?? 0} 片 · {formatBytes(doc.size ?? 0)} · {timeAgo(new Date(doc.uploaded_at ?? 0).getTime())}
                     </p>
                   </div>
                   <button

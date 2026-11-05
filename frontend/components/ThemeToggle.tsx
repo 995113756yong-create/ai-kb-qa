@@ -8,7 +8,10 @@ import { Button } from "@/components/ui/button";
 
 export default function ThemeToggle() {
   const { theme, setTheme, resolvedTheme } = useTheme();
+  // 水合前不能读 theme（服务端拿不到），必须先渲染一个占位再切到真实图标。
+  // 这是 next-themes 官方文档推荐的标准写法，属于规则误报。
   const [mounted, setMounted] = useState(false);
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- 水合标记，只执行一次
   useEffect(() => setMounted(true), []);
 
   const next = theme === "system" ? (resolvedTheme === "dark" ? "light" : "dark") : theme === "dark" ? "light" : "dark";

@@ -27,10 +27,14 @@ export function EvidencePanel({ message, index, agentId, onClose, className }: E
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
+  // 切换引用条目时清空上一次的正文。用「上一次的 index」判断是否真的换了条目，
+  // 避免 effect 里无条件 setState（react-hooks/set-state-in-effect）。
+  const [prevIndex, setPrevIndex] = useState(index);
+  if (index !== prevIndex) {
+    setPrevIndex(index);
     setChunkText(null);
     setError(null);
-  }, [index]);
+  }
 
   // Esc 关闭面板（方案 6.11）
   useEffect(() => {

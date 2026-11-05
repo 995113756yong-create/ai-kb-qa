@@ -14,38 +14,49 @@ function newId(): string {
   return `id-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
-export function useConversations(agentId: string) {
+export function useConversations(agentId: string, initialConversationId: string | null = null) {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [currentId, setCurrentId] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
+  // loadedFor 记录「当前 conversations 属于哪个专家」：
+  // 切换专家后到加载完成之前两者不相等，此时不落盘，避免把上个专家的会话写进新 key。
+  const [loadedFor, setLoadedFor] = useState<string | null>(null);
   const agentRef = useRef(agentId);
-  agentRef.current = agentId;
 
-  // 切换专家：先把当前专家的会话存盘，再加载新专家的
+  // agentRef 只在 effect 里写（渲染期不能改 ref），供 create / save 使用最新 expert。
+  useEffect(() => {
+    agentRef.current = agentId;
+  }, [agentId]);
+
+  // 切换专家：清空当前视图并加载新专家的会话。
+  // 所有 setState 都在 await 之后，避免 effect 同步阶段触发级联渲染。
   useEffect(() => {
     let cancelled = false;
-    setLoaded(false);
-    setConversations([]);
-    setCurrentId(null);
-    loadConversations(agentId).then((list) => {
+    void (async () => {
+      const list = await loadConversations(agentId);
       if (cancelled) return;
       setConversations(list);
-      setCurrentId(list.length > 0 ? list[0].id : null);
+      // 优先恢复链接里指定的会话（?c=<id>），找不到时退回最近一条
+      const wanted = initialConversationId && list.some((c) => c.id === initialConversationId)
+        ? initialConversationId
+        : (list.length > 0 ? list[0].id : null);
+      setCurrentId(wanted);
       setLoaded(true);
-    });
+      setLoadedFor(agentId);
+    })();
     return () => {
       cancelled = true;
     };
-  }, [agentId]);
+  }, [agentId, initialConversationId]);
 
-  // 会话变化时自动保存（防抖 400ms）
+  // 会话变化时自动保存（防抖 400ms）。只在「已加载且属于当前专家」时写。
   useEffect(() => {
-    if (!loaded) return;
+    if (!loaded || loadedFor !== agentId) return;
     const timer = setTimeout(() => {
-      void saveConversations(agentRef.current, conversations);
+      void saveConversations(agentId, conversations);
     }, 400);
     return () => clearTimeout(timer);
-  }, [conversations, loaded]);
+  }, [conversations, loaded, loadedFor, agentId]);
 
   const current = conversations.find((c) => c.id === currentId) ?? null;
 
