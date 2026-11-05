@@ -1,30 +1,36 @@
-"""反馈文件轮转: /api/feedback 不需要鉴权, 每条最大约 9.5KB, 必须设上限."""
+"""Feedback file rotation: /api/feedback needs no auth, each entry up to ~9.5KB,
+so the file must have a size cap.
+
+NOTE: create_app must receive the fake embeddings/llm, otherwise app.state.store
+is None and every write endpoint returns 503. CI has no OPENAI_API_KEY, so this
+must never rely on a real key.
+"""
 import json
 from concurrent.futures import ThreadPoolExecutor
 
-from starlette.testclient import TestClient
+from fastapi.testclient import TestClient
 
 from app import config
 from app.main import _append_feedback, create_app
 
 
-def _client_with_log_dir(tmp_path, log_dir):
-    """用显式 log_dir 建 app.
-
-    agent_log_dir 是 create_app 的默认参数, 只在函数定义时求值,
-    monkeypatch 改 config.AGENT_LOG_DIR 影响不到它, 必须显式传.
-    """
-    app = create_app(agent_log_dir=str(log_dir))
+def _client_with_log_dir(tmp_path, embeddings, llm, log_dir):
+    app = create_app(
+        embeddings=embeddings,
+        llm=llm,
+        upload_dir=str(tmp_path / "uploads"),
+        index_dir=str(tmp_path / "faiss_index"),
+        agent_log_dir=str(log_dir),
+    )
     client = TestClient(app)
     client.__enter__()
     return client
 
 
-def test_feedback_rotates_when_exceeding_limit(tmp_path, monkeypatch):
-    """超过上限后主文件轮转为 .1, 不会无限增长."""
-    monkeypatch.setattr(config, "FEEDBACK_MAX_MB", 0.0001)  # 约 100 字节
+def test_feedback_rotates_when_exceeding_limit(tmp_path, embeddings, llm, monkeypatch):
+    monkeypatch.setattr(config, "FEEDBACK_MAX_MB", 0.0001)  # about 100 bytes
     log_dir = tmp_path / "logs"
-    client = _client_with_log_dir(tmp_path, log_dir)
+    client = _client_with_log_dir(tmp_path, embeddings, llm, log_dir)
 
     payload = {
         "agent_id": "default",
@@ -34,27 +40,28 @@ def test_feedback_rotates_when_exceeding_limit(tmp_path, monkeypatch):
         "reason": "li you" * 10,
     }
     for _ in range(3):
-        assert client.post("/api/feedback", json=payload).status_code == 200
+        r = client.post("/api/feedback", json=payload)
+        assert r.status_code == 200, r.text
 
     main_file = log_dir / "feedback.jsonl"
     rotated = log_dir / "feedback.jsonl.1"
 
-    assert main_file.exists(), f"expected {main_file} to exist"
+    assert main_file.exists(), "expected %s to exist" % main_file
     assert rotated.exists(), "overtop limit should produce .1 archive"
 
     total = main_file.stat().st_size + rotated.stat().st_size
     assert total < 10 * 1024
 
 
-def test_feedback_appends_without_rotation_under_limit(tmp_path, monkeypatch):
-    """未超上限时正常追加, 不产生 .1."""
+def test_feedback_appends_without_rotation_under_limit(tmp_path, embeddings, llm, monkeypatch):
     monkeypatch.setattr(config, "FEEDBACK_MAX_MB", 100)  # 100MB
     log_dir = tmp_path / "logs2"
-    client = _client_with_log_dir(tmp_path, log_dir)
+    client = _client_with_log_dir(tmp_path, embeddings, llm, log_dir)
 
     payload = {"agent_id": "default", "question": "q", "answer": "a", "rating": "up"}
     for _ in range(3):
-        assert client.post("/api/feedback", json=payload).status_code == 200
+        r = client.post("/api/feedback", json=payload)
+        assert r.status_code == 200, r.text
 
     main_file = log_dir / "feedback.jsonl"
     assert main_file.exists()
@@ -66,7 +73,6 @@ def test_feedback_appends_without_rotation_under_limit(tmp_path, monkeypatch):
 
 
 def test_append_feedback_helper_is_atomic_under_threads(tmp_path):
-    """多线程同时写不会丢行."""
     path = str(tmp_path / "f.jsonl")
 
     def write(i: int) -> None:
