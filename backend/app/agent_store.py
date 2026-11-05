@@ -202,6 +202,10 @@ class AgentStore:
         os.makedirs(os.path.dirname(self.index_dir_of(agent_id)), exist_ok=True)
 
         with self._lock:
+            # 锁内再查一次：上面那次检查在锁外，两个请求同时用同一个 ID 创建时
+            # 都能通过，后写入的会覆盖前一个。
+            if agent_id in self._agents:
+                raise ValueError(f"agent_id 已存在：{agent_id}")
             self._agents[agent_id] = entry
             self._save()
         return dict(entry)
