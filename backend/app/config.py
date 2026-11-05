@@ -100,3 +100,11 @@ JUDGE_API_KEY = os.getenv("JUDGE_API_KEY") or OPENAI_API_KEY
 # 评测费用估算（元 / 百万 token），用于报告；不配则显示"未配置"
 PRICE_INPUT_PER_M = float(os.getenv("PRICE_INPUT_PER_M", "0") or 0)
 PRICE_OUTPUT_PER_M = float(os.getenv("PRICE_OUTPUT_PER_M", "0") or 0)
+
+# 模型调用超时（秒）。流式回答时是两个 chunk 之间的读超时，不是整段回答的总时长。
+# 不设上限时 SDK 默认 600 秒，模型服务一卡就会长时间占住后台线程。
+LLM_TIMEOUT_SECONDS = float(os.getenv("LLM_TIMEOUT_SECONDS", "60"))
+# 模型调用失败重试次数上限（SDK 默认 2，模型服务抖动时容易叠加成长时间等待）
+LLM_MAX_RETRIES = int(os.getenv("LLM_MAX_RETRIES", "1"))
+# Embedding 调用超时（秒）
+EMBEDDING_TIMEOUT_SECONDS = float(os.getenv("EMBEDDING_TIMEOUT_SECONDS", "30"))

@@ -6,6 +6,7 @@ from langchain_core.language_models import BaseChatModel
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 
+from app import config
 from app.config import CHAT_MODEL, OPENAI_API_BASE, OPENAI_API_KEY, TOP_K
 from app.document import KnowledgeBase
 
@@ -37,6 +38,8 @@ def get_llm() -> BaseChatModel:
         openai_api_key=OPENAI_API_KEY,
         openai_api_base=OPENAI_API_BASE,
         temperature=0.1,
+        timeout=config.LLM_TIMEOUT_SECONDS,
+        max_retries=config.LLM_MAX_RETRIES,
     )
 
 

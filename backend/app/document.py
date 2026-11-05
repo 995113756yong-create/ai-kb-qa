@@ -16,6 +16,7 @@ from langchain_core.documents import Document
 from langchain_core.embeddings import Embeddings
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
+from app import config
 from app.config import (
     CHUNK_OVERLAP,
     CHUNK_SIZE,
@@ -23,9 +24,9 @@ from app.config import (
     HYBRID_BM25_WEIGHT,
     HYBRID_SEARCH_ENABLED,
     HYBRID_VECTOR_WEIGHT,
-    RRF_K,
     OPENAI_API_BASE,
     OPENAI_API_KEY,
+    RRF_K,
 )
 from app.retrieval import BM25Index, fuse_scores, hybrid_search
 
@@ -50,6 +51,8 @@ def get_embeddings() -> Embeddings:
         openai_api_key=OPENAI_API_KEY,
         openai_api_base=OPENAI_API_BASE,
         check_embedding_ctx_length=False,
+        timeout=config.EMBEDDING_TIMEOUT_SECONDS,
+        max_retries=config.LLM_MAX_RETRIES,
     )
 
 

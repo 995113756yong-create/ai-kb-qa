@@ -58,6 +58,8 @@ class OpenAICompatibleLLM:
         self._client = OpenAI(
             api_key=api_key or config.OPENAI_API_KEY,
             base_url=base_url or config.OPENAI_API_BASE,
+            timeout=config.LLM_TIMEOUT_SECONDS,
+            max_retries=config.LLM_MAX_RETRIES,
         )
 
     def chat(self, messages: List[dict], tools: Optional[List[dict]] = None) -> AssistantTurn:
