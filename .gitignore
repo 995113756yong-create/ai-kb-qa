@@ -43,3 +43,5 @@ eval/results/
 .session_tmps/
 lint.json
 lint2.json
+# 本地复现 CI 用的临时虚拟环境
+.ci_env/
