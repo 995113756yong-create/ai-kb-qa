@@ -108,3 +108,7 @@ LLM_TIMEOUT_SECONDS = float(os.getenv("LLM_TIMEOUT_SECONDS", "60"))
 LLM_MAX_RETRIES = int(os.getenv("LLM_MAX_RETRIES", "1"))
 # Embedding 调用超时（秒）
 EMBEDDING_TIMEOUT_SECONDS = float(os.getenv("EMBEDDING_TIMEOUT_SECONDS", "30"))
+
+# 反馈文件大小上限（MB）。/api/feedback 不需要鉴权、每条最大约 9.5KB，
+# 不设上限会无限增长；超过后轮转为 feedback.jsonl.1，磁盘最多占用约 2 倍上限。
+FEEDBACK_MAX_MB = float(os.getenv("FEEDBACK_MAX_MB", "5"))
