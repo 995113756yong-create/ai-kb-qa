@@ -3,6 +3,8 @@ import type {
   AgentCreateRequest,
   AgentEvent,
   AgentListResponse,
+  ChunkResponse,
+  FeedbackRequest,
   AskResponse,
   DeleteResponse,
   DocListResponse,
@@ -20,6 +22,11 @@ export class ApiError extends Error {
     super(message);
     this.name = "ApiError";
     this.status = status;
+  }
+
+  /** 从 fetch Response 构造：读取 body 里的 detail 转成可读文案。 */
+  static async from(res: Response): Promise<ApiError> {
+    return new ApiError(res.status, toMessage(res.status, await readBody(res)));
   }
 }
 
@@ -166,23 +173,43 @@ export function deleteAgent(agentId: string): Promise<DeleteResponse> {
 
 // ---------- Agent SSE ----------
 
+export type StreamAgentOptions = {
+  question: string;
+  onEvent: (event: AgentEvent) => void;
+  signal?: AbortSignal;
+  /** strict = 拒答优先；reference = 默认引用模式。 */
+  mode?: "strict" | "reference";
+  agentId?: string;
+};
+
 export async function streamAgent(
-  question: string,
-  onEvent: (event: AgentEvent) => void,
+  questionOrOptions: string | StreamAgentOptions,
+  onEvent?: (event: AgentEvent) => void,
   signal?: AbortSignal,
   agentId?: string,
 ): Promise<void> {
+  // 兼容两种调用：位置参数（旧）与对象参数（新，可带 mode）。
+  const opts: StreamAgentOptions =
+    typeof questionOrOptions === "string"
+      ? { question: questionOrOptions, onEvent: onEvent ?? (() => {}), signal, agentId }
+      : questionOrOptions;
+  const { question, signal: sig } = opts;
+  const cb = opts.onEvent;
+  const aid = opts.agentId;
   // agent_id 必须放进请求体：后端 AgentRequest 只解析 body，
   // 只放 URL 查询串会被忽略（曾在多专家平台上线时踩过这个坑）。
   const body: Record<string, unknown> = { question };
-  if (agentId && agentId !== DEFAULT_AGENT) {
-    body.agent_id = agentId;
+  if (aid && aid !== DEFAULT_AGENT) {
+    body.agent_id = aid;
   }
-  const res = await fetch(`/api/agent/stream${agentQuery(agentId)}`, {
+  if (opts.mode === "strict") {
+    body.answer_mode = "strict";
+  }
+  const res = await fetch(`/api/agent/stream${agentQuery(aid)}`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(body),
-    signal,
+    signal: sig,
     cache: "no-store",
   });
 
@@ -195,7 +222,7 @@ export async function streamAgent(
 
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
-  const parser = createSSEParser(onEvent);
+  const parser = createSSEParser(cb);
 
   for (;;) {
     const { done, value } = await reader.read();
@@ -205,4 +232,24 @@ export async function streamAgent(
     parser.push(decoder.decode(value, { stream: true }));
   }
   parser.flush();
+}
+
+export async function getChunk(chunkId: string, agentId: string, window = 1): Promise<ChunkResponse> {
+  const params = new URLSearchParams({ agent_id: agentId, window: String(window) });
+  const res = await fetch(`/api/chunks/${encodeURIComponent(chunkId)}?${params}`);
+  if (!res.ok) {
+    throw await ApiError.from(res);
+  }
+  return (await res.json()) as ChunkResponse;
+}
+
+export async function sendFeedback(req: FeedbackRequest): Promise<void> {
+  const res = await fetch("/api/feedback", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(req),
+  });
+  if (!res.ok) {
+    throw await ApiError.from(res);
+  }
 }

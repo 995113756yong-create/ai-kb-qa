@@ -26,6 +26,14 @@ FITNESS_PERSONA = """你是一位专业健身教练，擅长增肌、减脂、�
 
 FITNESS_GREETING = "你好！我是你的健身教练💪 有任何训练、增肌减脂、饮食搭配的问题都可以问我。想从哪里开始？"
 
+# 首页启动问题（最多 4 条，供前端快捷提问使用）
+FITNESS_STARTERS = [
+    "新手如何安排一周的训练计划？",
+    "增肌期每天需要吃多少蛋白质？",
+    "减脂期可以做力量训练吗？",
+    "跑步前后应该怎么拉伸？",
+]
+
 # 健身语料：4 份，覆盖训练计划 / 饮食营养 / 力量动作库 / 跑步入门。
 # 事实类内容保持常识性、保守，并写明免责边界。
 FITNESS_CORPUS: List[tuple] = [
@@ -197,6 +205,11 @@ def ensure_seed_agents(store) -> List[str]:
     首次体验不再是空白界面。播种失败只打日志，不能阻塞服务启动。
     """
     created: List[str] = []
+    # 旧清单迁移：健身专家存在但缺 starter_questions 时补默认值（已有键不覆盖）
+    existing = store.get(FITNESS_AGENT_ID)
+    if existing and not existing.get("starter_questions"):
+        existing["starter_questions"] = list(FITNESS_STARTERS)
+        store.save_agent(existing)
     try:
         if store.get(FITNESS_AGENT_ID) is None:
             store.create(
@@ -207,6 +220,7 @@ def ensure_seed_agents(store) -> List[str]:
                 emoji="💪",
                 agent_id=FITNESS_AGENT_ID,
                 answer_mode="reference",
+                starter_questions=FITNESS_STARTERS,
             )
             created.append(FITNESS_AGENT_ID)
             logger.info("已播种内置专家：%s", FITNESS_AGENT_ID)

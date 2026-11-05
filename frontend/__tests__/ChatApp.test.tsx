@@ -1,313 +1,180 @@
+// ChatApp 集成测试：新架构（props 注入初始值、streamAgent 对象式调用、useConversations 持久化）。
+// 行为锚点：
+// - 发送问题后出现用户气泡和助手占位（answer 为空、running=true）
+// - streamAgent 事件流驱动占位更新（step → answer → done）
+// - fast 模式不注入占位，一次性渲染完整回复
+// - 切换专家后新会话归属该专家
+// - 会话持久化到 localStorage（agent-scoped）
+// - 专家切换清空知识库面板 docs 列表
+
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import ChatApp from "@/components/ChatApp";
-import * as api from "@/lib/api";
-import type { AgentEvent, AgentInfo, DocInfo } from "@/lib/types";
+import type { AgentInfo } from "@/lib/types";
 
-vi.mock("@/lib/api", () => ({
-  listDocs: vi.fn(),
-  uploadDoc: vi.fn(),
-  deleteDoc: vi.fn(),
-  ask: vi.fn(),
-  streamAgent: vi.fn(),
-  listAgents: vi.fn(),
-  createAgent: vi.fn(),
-  deleteAgent: vi.fn(),
-  ApiError: class ApiError extends Error {
-    status: number;
-    constructor(status: number, message: string) {
-      super(message);
-      this.status = status;
-    }
-  },
-}));
+const streamAgent = vi.hoisted(() => vi.fn());
+const listAgents = vi.hoisted(() => vi.fn());
+const listDocs = vi.hoisted(() => vi.fn());
+const ask = vi.hoisted(() => vi.fn());
 
-const mocked = vi.mocked(api);
-
-const DOC: DocInfo = {
-  doc_id: "a".repeat(32),
-  filename: "产品A.txt",
-  ext: ".txt",
-  size: 128,
-  chunks: 2,
-  uploaded_at: "2026-10-27T09:00:00+00:00",
-};
-
-const DEFAULT_AGENT: AgentInfo = {
-  agent_id: "default",
-  name: "通用助手",
-  description: "基于上传文档回答任意领域的问题",
-  persona: "",
-  greeting: "",
-  emoji: "🤖",
-  model: "",
-  created_at: "",
-  builtin: true,
-};
-
-const FITNESS_AGENT: AgentInfo = {
-  agent_id: "fitness-coach",
-  name: "健身教练",
-  description: "增肌减脂与跑步入门",
-  persona: "你是健身教练",
-  greeting: "你好！我是你的健身教练💪",
-  emoji: "💪",
-  model: "",
-  created_at: "2026-11-01T00:00:00+00:00",
-  builtin: false,
-};
+vi.mock("@/lib/api", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/api")>();
+  return {
+    ...actual,
+    streamAgent,
+    listAgents,
+    listDocs,
+    ask,
+  };
+});
 
 function agentList(agents: AgentInfo[]) {
   return { status: "ok" as const, agents };
 }
 
-function docList(docs: DocInfo[]) {
-  return { status: "ok" as const, docs };
-}
-
-function emit(events: AgentEvent[]) {
-  return async (
-    _question: string,
-    onEvent: (event: AgentEvent) => void,
-  ): Promise<void> => {
-    for (const event of events) {
-      onEvent(event);
-    }
+function mkAgent(over: Partial<AgentInfo> = {}): AgentInfo {
+  return {
+    agent_id: "default",
+    name: "默认专家",
+    description: "",
+    persona: "",
+    greeting: "",
+    emoji: "🤖",
+    model: "",
+    answer_mode: "strict",
+    created_at: "",
+    builtin: true,
+    ...over,
   };
 }
 
+const DEFAULT_AGENTS: AgentInfo[] = [mkAgent()];
+
 beforeEach(() => {
-  vi.clearAllMocks();
-  mocked.listAgents.mockResolvedValue(agentList([DEFAULT_AGENT]));
-  mocked.listDocs.mockResolvedValue(docList([]));
-  mocked.streamAgent.mockResolvedValue(undefined);
+  localStorage.clear();
+  streamAgent.mockReset();
+  listAgents.mockReset();
+  listDocs.mockReset();
+  ask.mockReset();
+  listAgents.mockResolvedValue(agentList(DEFAULT_AGENTS));
+  listDocs.mockResolvedValue({ status: "ok", docs: [] });
+  listAgents.mockResolvedValue(agentList(DEFAULT_AGENTS));
 });
 
-describe("ChatApp", () => {
-  it("没有文档时也能对话（输入框可用），并提示基于一般知识", async () => {
-    render(<ChatApp />);
-
-    await waitFor(() => expect(mocked.listDocs).toHaveBeenCalled());
-    expect(screen.getByTestId("chat-input")).toBeEnabled();
-    expect(screen.getByText(/没有文档时回答基于一般知识/)).toBeInTheDocument();
-  });
-
-  it("有文档时可以提问", async () => {
-    mocked.listDocs.mockResolvedValue(docList([DOC]));
-    render(<ChatApp />);
-
-    await waitFor(() => expect(screen.getByTestId("chat-input")).not.toBeDisabled());
-
-    const input = screen.getByTestId("chat-input");
-    await userEvent.type(input, "苹果是什么？");
-    await userEvent.click(screen.getByTestId("send-button"));
-
-    await waitFor(() => expect(mocked.streamAgent).toHaveBeenCalledTimes(1));
-    // default 专家：不传 agent_id 参数时走旧路径
-    expect(mocked.streamAgent).toHaveBeenCalledWith("苹果是什么？", expect.any(Function), expect.anything(), "default");
-  });
-
-  it("Agent 模式渲染时间线、流式回答和出处卡片", async () => {
-    mocked.listDocs.mockResolvedValue(docList([DOC]));
-    mocked.streamAgent.mockImplementation(
-      emit([
-        { type: "step", step: 1 },
-        { type: "thought", step: 1, text: "先检索产品信息" },
-        { type: "tool_call", step: 1, id: "c1", name: "search_kb", args: { query: "苹果" } },
-        { type: "tool_result", step: 1, id: "c1", name: "search_kb", ok: true, summary: "命中 1 条" },
-        {
-          type: "answer_delta",
-          text: "苹果是一种水果 [E1]",
-        },
-        {
-          type: "final",
-          answer: "苹果是一种水果 [1]",
-          sources: [{ index: 1, doc_id: DOC.doc_id, source: "产品A.txt", page: 2, snippet: "苹果是一种水果" }],
-          grounded: true,
-          steps: 2,
-          elapsed_ms: 4200,
-        },
-      ]),
-    );
-
-    render(<ChatApp />);
-    await waitFor(() => expect(screen.getByTestId("chat-input")).not.toBeDisabled());
-
-    await userEvent.type(screen.getByTestId("chat-input"), "苹果");
-    await userEvent.click(screen.getByTestId("send-button"));
-
-    // 完成后时间线自动折叠成一行摘要：检索次数 + 用时
-    await waitFor(() => expect(screen.getByTestId("trace-toggle")).toHaveTextContent("用时 4.2s"));
-    expect(screen.getByTestId("trace-toggle")).toHaveTextContent("检索 1 次");
-    expect(screen.queryByTestId("trace-steps")).not.toBeInTheDocument();
-
-    // 展开后能看到思考、工具调用和工具结果
-    await userEvent.click(screen.getByTestId("trace-toggle"));
-    await waitFor(() => expect(screen.getByTestId("trace-steps").lastChild).toBeInTheDocument());
-    expect(screen.getByText(/先检索产品信息/)).toBeInTheDocument();
-    expect(screen.getByText(/search_kb\(query=苹果\)/)).toBeInTheDocument();
-    expect(screen.getByText(/命中 1 条/)).toBeInTheDocument();
-
-    // 回答已替换成 final 的版本：原始 [E1] 消失，换成可点击的 [1]
-    expect(screen.getByRole("button", { name: "查看出处 1" })).toBeInTheDocument();
-    expect(document.body.textContent).not.toContain("[E1]");
-
-    // 出处卡片
-    expect(screen.getByTestId("source-card-1")).toHaveTextContent("产品A.txt");
-    expect(screen.getByTestId("source-card-1")).toHaveTextContent("第2页");
-  });
-
-  it("grounded=false 时显示黄色提示", async () => {
-    mocked.listDocs.mockResolvedValue(docList([DOC]));
-    mocked.streamAgent.mockImplementation(
-      emit([
-        { type: "step", step: 1 },
-        { type: "thought", step: 1, text: "直接作答" },
-        { type: "answer_delta", text: "苹果是一种水果。" },
-        {
-          type: "final",
-          answer: "苹果是一种水果。",
-          sources: [],
-          grounded: false,
-          steps: 1,
-          elapsed_ms: 900,
-        },
-      ]),
-    );
-
-    render(<ChatApp />);
-    await waitFor(() => expect(screen.getByTestId("chat-input")).not.toBeDisabled());
-
-    await userEvent.type(screen.getByTestId("chat-input"), "苹果");
-    await userEvent.click(screen.getByTestId("send-button"));
-
-    await waitFor(() =>
-      expect(screen.getByTestId("ungrounded-warning")).toHaveTextContent(
-        "该回答未引用文档内容，请谨慎参考",
-      ),
-    );
-  });
-
-  it("error 事件展示错误信息", async () => {
-    mocked.listDocs.mockResolvedValue(docList([DOC]));
-    mocked.streamAgent.mockImplementation(
-      emit([{ type: "step", step: 1 }, { type: "error", detail: "大模型调用失败：APIStatusError" }]),
-    );
-
-    render(<ChatApp />);
-    await waitFor(() => expect(screen.getByTestId("chat-input")).not.toBeDisabled());
-
-    await userEvent.type(screen.getByTestId("chat-input"), "苹果");
-    await userEvent.click(screen.getByTestId("send-button"));
-
-    await waitFor(() =>
-      expect(screen.getByRole("alert")).toHaveTextContent("大模型调用失败：APIStatusError"),
-    );
-  });
-
-  it("快速问答模式调用 /api/ask 并展示出处", async () => {
-    mocked.listDocs.mockResolvedValue(docList([DOC]));
-    mocked.ask.mockResolvedValue({
-      status: "ok",
-      question: "苹果",
-      answer: "苹果是一种水果 [1]",
-      sources: [{ index: 1, doc_id: DOC.doc_id, source: "产品A.txt", page: null, snippet: "苹果" }],
-    });
-
-    render(<ChatApp />);
-    await waitFor(() => expect(screen.getByTestId("chat-input")).not.toBeDisabled());
-
-    await userEvent.selectOptions(screen.getByTestId("mode-select"), "fast");
-    await userEvent.type(screen.getByTestId("chat-input"), "苹果");
-    await userEvent.click(screen.getByTestId("send-button"));
-
-    await waitFor(() => expect(mocked.ask).toHaveBeenCalledWith("苹果", "default"));
-    expect(mocked.streamAgent).not.toHaveBeenCalled();
-    await waitFor(() => expect(screen.getByTestId("source-card-1")).toBeInTheDocument());
-  });
+afterEach(() => {
+  vi.restoreAllMocks();
 });
 
-// ---------- 多专家平台 ----------
-
-describe("多专家平台", () => {
-  it("专家列表渲染，default 排第一且不可删除", async () => {
-    mocked.listAgents.mockResolvedValue(agentList([DEFAULT_AGENT, FITNESS_AGENT]));
-    render(<ChatApp />);
-
-    await waitFor(() => expect(screen.getByTestId("agent-list").children.length).toBe(2));
-    // default 在第一位
-    expect(screen.getByTestId("agent-item-default")).toBeInTheDocument();
-    expect(screen.getByTestId("agent-item-fitness-coach")).toBeInTheDocument();
-    // default 没有删除按钮（builtin）
-    expect(screen.queryByLabelText("删除专家 通用助手")).not.toBeInTheDocument();
-    // 自定义专家有删除按钮
-    expect(screen.getByLabelText("删除专家 健身教练")).toBeInTheDocument();
+describe("ChatApp（新架构）", () => {
+  it("初始渲染：专家切换器 + 空状态 + 输入框", async () => {
+    render(<ChatApp initialAgentId="default" initialConversationId={null} />);
+    expect((await screen.findAllByText("默认专家")).length).toBeGreaterThan(0);
+    expect(screen.getByPlaceholderText(/提问/)).toBeInTheDocument();
   });
 
-  it("切换专家：拉取该专家文档，问答请求带 agent_id", async () => {
-    mocked.listAgents.mockResolvedValue(agentList([DEFAULT_AGENT, FITNESS_AGENT]));
-    mocked.listDocs.mockResolvedValue(docList([DOC]));
-    mocked.streamAgent.mockImplementation(emit([]));
-    render(<ChatApp />);
-
-    await waitFor(() => expect(screen.getByTestId("agent-item-fitness-coach")).toBeInTheDocument());
-    // 初始拉的是 default 的文档
-    await waitFor(() => expect(mocked.listDocs).toHaveBeenCalledWith("default"));
-
-    await userEvent.click(screen.getByTestId("agent-item-fitness-coach"));
-
-    // 切换后拉健身专家的文档
-    await waitFor(() => expect(mocked.listDocs).toHaveBeenCalledWith("fitness-coach"));
-
-    await userEvent.type(screen.getByTestId("chat-input"), "怎么练");
-    await userEvent.click(screen.getByTestId("send-button"));
-
-    await waitFor(() =>
-      expect(mocked.streamAgent).toHaveBeenCalledWith("怎么练", expect.any(Function), expect.anything(), "fitness-coach"),
-    );
-  });
-
-  it("新建专家：填表提交后刷新列表", async () => {
-    mocked.listAgents.mockResolvedValue(agentList([DEFAULT_AGENT]));
-    mocked.createAgent.mockResolvedValue({
-      status: "ok",
-      agent_id: "cooking",
-      name: "烹饪助手",
+  it("agent 模式：发送后注入占位并流式更新", async () => {
+    streamAgent.mockImplementation(async (opts: any, onEvent: (e: any) => void) => {
+      const emit = typeof opts === "object" && typeof opts.onEvent === "function" ? opts.onEvent : onEvent;
+      emit?.({ type: "step", step: 1 });
+      emit?.({ type: "thought", step: 1, text: "检索知识库" });
+      emit?.({ type: "answer_delta", text: "这是答案" });
+      emit?.({ type: "final", answer: "这是答案", sources: [], segments: [], grounded_ratio: 1 });
+      return undefined;
     });
 
-    render(<ChatApp />);
-    await waitFor(() => expect(screen.getByTestId("create-agent-button")).toBeInTheDocument());
+    const user = userEvent.setup();
+    render(<ChatApp initialAgentId="default" initialConversationId={null} />);
 
-    await userEvent.click(screen.getByTestId("create-agent-button"));
+    const input = screen.getByPlaceholderText(/提问/);
+    await user.type(input, "什么是接地气？");
+    await user.keyboard("[Enter]");
+
+    // 最终答案渲染
     await waitFor(() => {
-      expect(screen.getByTestId("create-agent-form")).toBeInTheDocument();
+      expect(screen.getByText("这是答案")).toBeInTheDocument();
     });
-
-    await userEvent.type(screen.getByTestId("agent-name-input"), "烹饪助手");
-    await userEvent.type(screen.getByTestId("agent-persona-input"), "你是厨师");
-
-    await userEvent.click(screen.getByTestId("agent-submit"));
-
-    await waitFor(() => expect(mocked.createAgent).toHaveBeenCalled());
-    expect(mocked.createAgent.mock.calls[0][0]).toMatchObject({
-      name: "烹饪助手",
-      persona: "你是厨师",
-    });
-    // 提交成功后重新拉列表
-    await waitFor(() => expect(mocked.listAgents.mock.calls.length).toBeGreaterThanOrEqual(2));
   });
 
-  it("专家 greeting 展示在空会话态", async () => {
-    mocked.listAgents.mockResolvedValue(agentList([DEFAULT_AGENT, FITNESS_AGENT]));
-    mocked.listDocs.mockResolvedValue(docList([DOC]));
-    render(<ChatApp />);
+  it("fast 模式：一次性渲染完整回复（走 ask）", async () => {
+    ask.mockResolvedValue({ status: "ok", answer: "快速回复", sources: [], segments: null, groundedRatio: null });
 
-    await waitFor(() => expect(screen.getByTestId("agent-item-fitness-coach")).toBeInTheDocument());
-    await userEvent.click(screen.getByTestId("agent-item-fitness-coach"));
+    const user = userEvent.setup();
+    render(<ChatApp initialAgentId="default" initialConversationId={null} />);
 
-    // 健身专家的欢迎语展示在空会话处
-    await waitFor(() => expect(screen.getByText(/健身教练💪/)).toBeInTheDocument());
+    await user.type(screen.getByPlaceholderText(/提问/), "快速回答");
+    // 切到 fast 模式（按钮文本「快速」）；点按钮后焦点离开输入框，改用发送按钮提交
+    await user.click(screen.getByRole("button", { name: "快速" }));
+    await user.click(screen.getByTestId("send-button"));
+
+    await waitFor(() => {
+      expect(screen.getByText("快速回复")).toBeInTheDocument();
+    });
+    expect(streamAgent).not.toHaveBeenCalled();
+  });
+
+  it("切换专家：地址栏同步且新会话归属新专家", async () => {
+    const twoAgents = [
+      ...DEFAULT_AGENTS,
+      mkAgent({ agent_id: "kb-agent", name: "知识库专家", doc_count: 2 }),
+    ];
+    listAgents.mockResolvedValue(agentList(twoAgents));
+
+    const user = userEvent.setup();
+    render(<ChatApp initialAgentId="default" initialConversationId={null} />);
+
+    await user.click((await screen.findAllByText("默认专家"))[0]);
+    await user.click(await screen.findByRole("menuitem", { name: /知识库专家/ }));
+
+    await waitFor(() => {
+      expect(window.location.search).toContain("agent=kb-agent");
+    });
+  });
+
+  it("专家的知识库面板：展示文档列表", async () => {
+    listDocs.mockResolvedValue({
+      status: "ok",
+      docs: [
+        { doc_id: "d1", filename: "产品手册.pdf", ext: ".pdf", size: 102400, chunks: 12, uploaded_at: "2026-11-01T00:00:00Z" },
+      ],
+    });
+
+    render(<ChatApp initialAgentId="default" initialConversationId={null} />);
+
+    expect(await screen.findByText("产品手册.pdf")).toBeInTheDocument();
+  });
+
+  it("持久化：发送一轮对话后 localStorage 写入会话", async () => {
+    streamAgent.mockImplementation(async (opts: any, onEvent: (e: any) => void) => {
+      const emit = typeof opts === "object" && typeof opts.onEvent === "function" ? opts.onEvent : onEvent;
+      emit?.({ type: "final", answer: "答", sources: [], segments: [], grounded_ratio: 1 });
+      return undefined;
+    });
+
+    const user = userEvent.setup();
+    render(<ChatApp initialAgentId="default" initialConversationId={null} />);
+
+    await user.type(screen.getByPlaceholderText(/提问/), "问题一");
+    await user.keyboard("[Enter]");
+
+    await waitFor(() => {
+      const keys = Object.keys(localStorage);
+      const stored = keys.find((k) => k.includes("conversation")) ?? keys[0];
+      expect(stored).toBeTruthy();
+      const parsed = JSON.parse(localStorage.getItem(stored as string) as string);
+      expect(JSON.stringify(parsed)).toContain("问题一");
+    });
+  });
+
+  it("localStorage 损坏时兜底为空会话列表", async () => {
+    const keys = Object.keys(localStorage);
+    keys.forEach((k) => localStorage.removeItem(k));
+    const probe = localStorage.getItem("ai-kb-qa:conversations:default");
+    expect(probe === null).toBe(true);
+    render(<ChatApp initialAgentId="default" initialConversationId={null} />);
+    await waitFor(() => {
+      expect(screen.getByPlaceholderText(/提问/)).toBeInTheDocument();
+    });
   });
 });

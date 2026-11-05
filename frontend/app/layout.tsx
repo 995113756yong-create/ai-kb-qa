@@ -1,20 +1,22 @@
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
+import { GeistMono } from "geist/font/mono";
+import { GeistSans } from "geist/font/sans";
+
+import { AppProviders } from "@/components/AppProviders";
 
 import "./globals.css";
 
 export const metadata: Metadata = {
   title: "AI 知识库问答",
-  description: "基于知识库的 Agent 问答系统：多步检索、证据引用、流式回答",
+  description: "多专家 AI 知识库问答：严格模式可信引用，参考模式高效回答",
 };
 
-// 不用 Next 生成的全局 LayoutProps 类型：它是 next dev/build 后才写入的类型，
-// CI 里先跑 tsc --noEmit 时还不存在，会报 Cannot find name 'LayoutProps'
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
-    <html lang="zh-CN" className="h-full antialiased">
-      <body className="min-h-full bg-zinc-50 text-zinc-900 dark:bg-zinc-950 dark:text-zinc-100">
-        {children}
+    <html lang="zh-CN" suppressHydrationWarning className={`${GeistSans.variable} ${GeistMono.variable}`}>
+      <body className="min-h-screen bg-background font-sans text-foreground antialiased">
+        <AppProviders>{children}</AppProviders>
       </body>
     </html>
   );

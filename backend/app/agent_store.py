@@ -127,7 +127,9 @@ class AgentStore:
         if agent_id == DEFAULT_AGENT_ID:
             with self._lock:
                 stored = self._agents.get(DEFAULT_AGENT_ID)
-            return dict(stored or DEFAULT_AGENT)
+            entry = dict(stored or DEFAULT_AGENT)
+            entry.setdefault("starter_questions", [])
+            return entry
         with self._lock:
             entry = self._agents.get(agent_id)
         return dict(entry) if entry else None
@@ -138,8 +140,10 @@ class AgentStore:
             others = [dict(e) for e in self._agents.values() if e.get("agent_id") != DEFAULT_AGENT_ID]
         head = self.get(DEFAULT_AGENT_ID)
         head["answer_mode"] = effective_mode(head)
+        head.setdefault("starter_questions", [])
         for e in others:
             e.setdefault("answer_mode", "reference")
+            e.setdefault("starter_questions", [])
         return [head] + others
 
     def create(
@@ -152,6 +156,7 @@ class AgentStore:
         model: str = "",
         agent_id: Optional[str] = None,
         answer_mode: str = "reference",
+        starter_questions: Optional[list] = None,
     ) -> dict:
         name = (name or "").strip()
         if not name:
@@ -164,6 +169,9 @@ class AgentStore:
         answer_mode = (answer_mode or "reference").strip()
         if answer_mode not in VALID_ANSWER_MODES:
             raise ValueError(f"answer_mode 必须是 {VALID_ANSWER_MODES} 之一")
+        starters = [str(q).strip() for q in (starter_questions or []) if str(q).strip()]
+        if len(starters) > 4:
+            raise ValueError("starter_questions 最多 4 条")
 
         if agent_id is None:
             agent_id = uuid.uuid4().hex[:8]
@@ -184,6 +192,7 @@ class AgentStore:
             "emoji": (emoji or "").strip(),
             "model": model,
             "answer_mode": answer_mode,
+            "starter_questions": starters,
             "created_at": now_iso(),
             "builtin": False,
         }
@@ -194,6 +203,16 @@ class AgentStore:
 
         with self._lock:
             self._agents[agent_id] = entry
+            self._save()
+        return dict(entry)
+
+    def save_agent(self, entry: dict) -> Optional[dict]:
+        """更新单个专家的清单记录（用于字段迁移）。专家不存在时忽略。"""
+        agent_id = entry.get("agent_id")
+        with self._lock:
+            if agent_id not in self._agents:
+                return None
+            self._agents[agent_id] = dict(entry)
             self._save()
         return dict(entry)
 

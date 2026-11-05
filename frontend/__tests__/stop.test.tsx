@@ -1,3 +1,6 @@
+// 停止生成测试：新事件协议（event.type + step 对象）+ props 注入初始值。
+// 锚点：chat-input / send-button / stopped-hint / assistant-* / stripRawCitations。
+
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -7,23 +10,16 @@ import { stripRawCitations } from "@/lib/answer";
 import * as api from "@/lib/api";
 import type { DocInfo } from "@/lib/types";
 
-vi.mock("@/lib/api", () => ({
-  listDocs: vi.fn(),
-  uploadDoc: vi.fn(),
-  deleteDoc: vi.fn(),
-  ask: vi.fn(),
-  streamAgent: vi.fn(),
-  listAgents: vi.fn(),
-  createAgent: vi.fn(),
-  deleteAgent: vi.fn(),
-  ApiError: class ApiError extends Error {
-    status: number;
-    constructor(status: number, message: string) {
-      super(message);
-      this.status = status;
-    }
-  },
-}));
+vi.mock("@/lib/api", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/api")>();
+  return {
+    ...actual,
+    listAgents: vi.fn(),
+    listDocs: vi.fn(),
+    streamAgent: vi.fn(),
+    ask: vi.fn(),
+  };
+});
 
 const mocked = vi.mocked(api);
 
@@ -37,6 +33,7 @@ const DOC: DocInfo = {
 };
 
 beforeEach(() => {
+  localStorage.clear();
   vi.clearAllMocks();
   mocked.listAgents.mockResolvedValue({
     status: "ok",
@@ -49,6 +46,7 @@ beforeEach(() => {
         greeting: "",
         emoji: "🤖",
         model: "",
+        answer_mode: "strict",
         created_at: "",
         builtin: true,
       },
@@ -71,7 +69,6 @@ describe("stripRawCitations", () => {
   });
 
   it("压缩删除后残留的多余空格", () => {
-    // 输入用的是半角逗号，输出也应保留半角
     expect(stripRawCitations("结论 [E3]  ,  下一句")).toBe("结论, 下一句");
   });
 });
@@ -79,10 +76,14 @@ describe("stripRawCitations", () => {
 describe("停止生成", () => {
   it("点停止后清掉原始编号并显示已停止", async () => {
     // mock 收到 abort 信号后才抛错，模拟真实的 fetch 中断时序
-    mocked.streamAgent.mockImplementation(async (_q, onEvent, signal) => {
-      onEvent({ type: "step", step: 1 });
-      onEvent({ type: "answer_delta", text: "苹果是水果 [E1]，" });
-      onEvent({ type: "answer_delta", text: "香蕉 [E2]。" });
+    mocked.streamAgent.mockImplementation((async (opts: any, onEvent, positionalSignal) => {
+      // streamAgent 支持对象式与位置参数两种调用，优先取对象里的字段
+      const emit = typeof opts?.onEvent === "function" ? opts.onEvent : onEvent;
+      const signal = opts?.signal ?? positionalSignal;
+      emit?.({ type: "step", step: 1 });
+      emit?.({ type: "thought", step: 1, text: "检索知识库" });
+      emit?.({ type: "answer_delta", text: "苹果是水果 [E1]，" });
+      emit?.({ type: "answer_delta", text: "香蕉 [E2]。" });
 
       await new Promise<void>((resolve, reject) => {
         if (signal?.aborted) {
@@ -95,9 +96,9 @@ describe("停止生成", () => {
         // 兜底，避免测试挂住
         setTimeout(resolve, 3000);
       });
-    });
+    }) as typeof api.streamAgent);
 
-    render(<ChatApp />);
+    render(<ChatApp initialAgentId="default" initialConversationId={null} />);
     await screen.findByTestId("chat-input");
 
     await userEvent.type(screen.getByTestId("chat-input"), "苹果");
@@ -118,16 +119,17 @@ describe("停止生成", () => {
   });
 
   it("停止后不会误报错误", async () => {
-    mocked.streamAgent.mockImplementation(async (_q, _onEvent, signal) => {
+    mocked.streamAgent.mockImplementation((async (opts: any, _onEvent, positionalSignal) => {
+      const signal = opts?.signal ?? positionalSignal;
       await new Promise<void>((resolve, reject) => {
         signal?.addEventListener("abort", () =>
           reject(new DOMException("aborted", "AbortError")),
         );
         setTimeout(resolve, 3000);
       });
-    });
+    }) as typeof api.streamAgent);
 
-    render(<ChatApp />);
+    render(<ChatApp initialAgentId="default" initialConversationId={null} />);
     await screen.findByTestId("chat-input");
 
     await userEvent.type(screen.getByTestId("chat-input"), "苹果");

@@ -1,9 +1,11 @@
+import json
 import logging
 import os
 import re
 import uuid
 from contextlib import asynccontextmanager
-from typing import Optional
+from datetime import datetime, timezone
+from typing import List, Optional
 
 from fastapi import Depends, FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.concurrency import run_in_threadpool
@@ -54,6 +56,18 @@ class AgentCreateRequest(BaseModel):
     model: str = Field("", max_length=100)
     agent_id: str = Field("", max_length=32)
     answer_mode: Literal["strict", "reference"] = "reference"
+    starter_questions: List[str] = Field(default_factory=list, max_length=4)
+
+
+class FeedbackRequest(BaseModel):
+    """回答点赞/点踩反馈：仅记录，不改变任何业务状态。"""
+    agent_id: str = Field(DEFAULT_AGENT_ID, max_length=32)
+    question: str = Field(..., min_length=1, max_length=1000)
+    answer: str = Field(..., min_length=1, max_length=8000)
+    rating: Literal["up", "down"]
+    reason: str = Field("", max_length=500)
+    mode: Optional[str] = None
+    grounded_ratio: Optional[float] = Field(None, ge=0, le=1)
 
 
 def _safe_display_name(filename: Optional[str]) -> str:
@@ -189,6 +203,73 @@ def create_app(
         entry = store.get(agent_id)
         return entry or {}
 
+    @app.post("/api/feedback")
+    def submit_feedback(req: FeedbackRequest, request: Request):
+        """回答反馈：限流但不要求管理员口令；专家不存在 404；写失败仍 200。"""
+        limiter.check("feedback:" + client_key(request))
+        store = getattr(request.app.state, "store", None)
+        if store is None:
+            raise HTTPException(status_code=503, detail=MISSING_KEY_MSG)
+        if req.agent_id != DEFAULT_AGENT_ID and not store.get(req.agent_id):
+            raise HTTPException(status_code=404, detail="专家不存在")
+        entry = {
+            "ts": datetime.now(timezone.utc).isoformat(),
+            "agent_id": req.agent_id,
+            "question": req.question,
+            "answer": req.answer,
+            "rating": req.rating,
+            "reason": req.reason,
+            "mode": req.mode,
+            "grounded_ratio": req.grounded_ratio,
+        }
+        try:
+            log_dir = store.log_dir_of(req.agent_id) if req.agent_id != DEFAULT_AGENT_ID else (
+                agent_log_dir or config.AGENT_LOG_DIR)
+            os.makedirs(log_dir, exist_ok=True)
+            with open(os.path.join(log_dir, "feedback.jsonl"), "a", encoding="utf-8") as f:
+                f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+        except Exception:
+            logger.warning("feedback 落盘失败", exc_info=True)
+        return {"status": "ok"}
+
+    @app.get("/api/chunks/{chunk_id}")
+    def get_chunk(chunk_id: str, request: Request, agent_id: str = DEFAULT_AGENT_ID,
+                  neighbors: int = 0):
+        """按 chunk_id 返回出处片段原文（含前后相邻片段，供出处弹层展示）。"""
+        store = getattr(request.app.state, "store", None)
+        if store is None:
+            raise HTTPException(status_code=503, detail=MISSING_KEY_MSG)
+        try:
+            kb = store.kb(agent_id) if agent_id and agent_id != DEFAULT_AGENT_ID else getattr(
+                request.app.state, "kb", None)
+        except Exception:
+            kb = getattr(request.app.state, "kb", None)
+        if kb is None:
+            raise HTTPException(status_code=503, detail="知识库未就绪")
+        doc = kb.get_chunk(chunk_id)
+        if doc is None:
+            raise HTTPException(status_code=404, detail="片段不存在")
+        meta = doc.metadata or {}
+        result = {
+            "chunk_id": chunk_id,
+            "doc_id": meta.get("doc_id"),
+            "source": meta.get("source"),
+            "page": meta.get("page"),
+            "content": doc.page_content,
+        }
+        window = max(0, min(int(neighbors), 3))
+        if window:
+            nbs = kb.get_neighbors(chunk_id, window=window)
+            result["neighbors"] = [
+                {"chunk_id": (n.metadata or {}).get("chunk_id"),
+                 "doc_id": (n.metadata or {}).get("doc_id"),
+                 "source": (n.metadata or {}).get("source"),
+                 "page": (n.metadata or {}).get("page"),
+                 "content": n.page_content}
+                for n in nbs
+            ]
+        return {"status": "ok", "chunk": result}
+
     @app.get("/api/docs")
     def list_docs(request: Request, agent_id: str = DEFAULT_AGENT_ID):
         # 列表接口：服务未就绪时返回空列表，不 503（与旧行为一致）
@@ -203,7 +284,15 @@ def create_app(
         store = getattr(request.app.state, "store", None)
         if store is None:
             raise HTTPException(status_code=503, detail=MISSING_KEY_MSG)
-        return {"status": "ok", "agents": store.list_agents()}
+        # B4：给每个专家补文档数（KB 未就绪时置 0，不阻塞列表）
+        agents = store.list_agents()
+        for a in agents:
+            try:
+                kb = store.kb(a["agent_id"])
+                a["doc_count"] = len(kb.list_documents())
+            except Exception:
+                a["doc_count"] = 0
+        return {"status": "ok", "agents": agents}
 
     @app.post("/api/agents")
     def create_agent(req: AgentCreateRequest, request: Request, _: None = Depends(require_admin)):
@@ -219,6 +308,7 @@ def create_app(
                 model=req.model,
                 agent_id=req.agent_id or None,
                 answer_mode=req.answer_mode,
+                starter_questions=req.starter_questions,
             )
         except ValueError as e:
             raise HTTPException(status_code=422, detail=str(e))
@@ -371,6 +461,9 @@ def create_app(
             persona=persona,
             agent_id=effective_agent_id,
             answer_mode=mode,
+            # B8：phase 事件默认关，AGENT_PHASE_EVENTS 开启后前端可展示研究阶段
+            emit_phases=os.getenv("AGENT_PHASE_EVENTS", "").strip().lower()
+            in ("1", "true", "yes", "on"),
             enable_intent=config.INTENT_ROUTING_ENABLED,
         )
         return StreamingResponse(
