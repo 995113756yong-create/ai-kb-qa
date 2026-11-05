@@ -82,16 +82,19 @@ ai-kb-qa/
 │   │   ├── qa.py               # 固定 RAG 链与 QAService
 │   │   ├── mcp_server.py       # MCP Server（JSON-RPC 2.0 over stdio）
 │   │   ├── agent_store.py      # 多专家存储（每专家独立知识库）
+│   │   ├── security.py         # 写接口鉴权 + 问答限流（滑动窗口 + 桶清理）
 │   │   ├── seed_agents.py      # 内置专家播种（健身教练 + 语料）
 │   │   ├── main.py             # 应用工厂 create_app + 全部 HTTP 接口
 │   │   └── agent/
 │   │       ├── llm.py          # AgentLLM 协议 + OpenAI 兼容实现
 │   │       ├── tools.py        # 工具定义（JSON Schema）与执行
-│   │       ├── evidence.py     # 证据登记表与引用校验
+│   │       ├── evidence.py     # 证据登记表与引用校验（含「未找到」句去引用）
+│   │       ├── intent.py       # 规则意图分流（闲聊 / 列文档 / 编号类预检索）
+│   │       ├── attribution.py  # 句子级溯源分类 + 数字一致性（放行显式算式）
 │   │       ├── query_rewrite.py # 复合问题拆解（默认关闭）
 │   │       ├── rerank.py       # LLM 二次排序（默认关闭）
 │   │       ├── prompts.py      # 系统提示词与回答提示词
-│   │       ├── runner.py       # ReAct 循环，产出事件流
+│   │       ├── runner.py       # ReAct 循环，产出事件流（含停止时补写日志）
 │   │       └── sse.py          # 事件 → SSE 文本、心跳、断连检测
 │   ├── tests/                  # pytest（假 Embedding / 假 LLM，不访问外网）
 │   ├── Dockerfile
@@ -101,9 +104,16 @@ ai-kb-qa/
 │   ├── app/
 │   │   ├── layout.tsx
 │   │   ├── page.tsx            # 只渲染 <ChatApp />
-│   │   └── api/[...path]/route.ts   # 转发层
-│   ├── components/             # ChatApp / DocSidebar / MessageList / AgentTrace / AnswerView / SourceCards / ChatInput
-│   ├── lib/                    # types / api / sse / chat
+│   │   ├── experts/page.tsx    # 专家画廊独立页
+│   │   ├── eval/page.tsx       # 评测看板（读构建期 eval-summary.json）
+│   │   └── api/[...path]/route.ts   # 转发层（覆盖 XFF 为可信 IP）
+│   ├── components/
+│   │   ├── *.tsx               # ChatApp / MessageList / AgentTrace / AnswerView / ChatInput
+│   │   ├── workspace/          # 工作台组件（侧栏 / 专家切换 / 出处面板 / 信任环等）
+│   │   └── ui/                 # shadcn 基础组件
+│   ├── hooks/                  # useAgents / useDocs / useHotkeys / useElapsed
+│   ├── lib/                    # types / api / sse / chat / store / useAgentRun / clientIp ...
+│   ├── data/eval-summary.json  # 评测看板数据（构建期生成）
 │   ├── __tests__/              # vitest
 │   └── Dockerfile
 ├── eval/                       # 评测集：端到端 + 检索层隔离测试
@@ -111,7 +121,11 @@ ai-kb-qa/
 │   ├── retrieval_probes.jsonl
 │   ├── corpus.py
 │   ├── run_eval.py
-│   └── bench_retrieval.py
+│   ├── judge.py                # LLM-as-judge（已设 timeout / max_retries）
+│   ├── calibrate_threshold.py  # 证据门槛校准
+│   ├── bench_retrieval.py
+│   └── report.md               # 最近的评测报告
+├── docs/                       # 设计与实施文档
 ├── docker-compose.yml          # 本地构建
 ├── docker-compose.prod.yml     # 拉取 GHCR 现成镜像
 ├── .github/workflows/docker-publish.yml

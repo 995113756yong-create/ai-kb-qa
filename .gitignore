@@ -39,3 +39,7 @@ Thumbs.db
 backend/agents_store/
 # 评测原始结果（只提交最终报告）
 eval/results/
+# AI 工具的一次性临时脚本
+.session_tmps/
+lint.json
+lint2.json
