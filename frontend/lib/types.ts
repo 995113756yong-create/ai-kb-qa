@@ -129,6 +129,7 @@ export type AgentCreateRequest = {
 export type ToolCallArgs = Record<string, unknown>;
 
 type StepEvent = { type: "step"; step: number };
+type IntentEvent = { type: "intent"; intent: "chat" | "list_docs" | "kb_query" | "uncertain"; reason: string };
 type DecomposeEvent = { type: "decompose"; step: number; queries: string[] };
 type ThoughtEvent = { type: "thought"; step: number; text: string };
 type ToolCallEvent = {
@@ -168,6 +169,7 @@ type PhaseEvent = { type: "phase"; phase: "research" | "answer" };
 // 按 type 区分的联合类型，消费端用 switch (event.type) 即可收窄
 export type AgentEvent =
   | StepEvent
+  | IntentEvent
   | DecomposeEvent
   | ThoughtEvent
   | ToolCallEvent

@@ -157,6 +157,12 @@ export function useAgentRun(options: Options = {}) {
                 case "step":
                   patch((m) => ({ ...m, phase: phaseFromEvent(event, m.phase) }));
                   break;
+                case "intent":
+                  appendStep(
+                    { kind: "intent", key: "intent", intent: event.intent, reason: event.reason },
+                    current.phase,
+                  );
+                  break;
                 case "thought":
                   appendStep({ kind: "thought", key: `thought-${event.step}`, text: event.text }, phaseFromEvent(event, current.phase));
                   break;

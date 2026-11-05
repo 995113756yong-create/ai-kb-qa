@@ -464,6 +464,7 @@ def create_app(
             # B8：phase 事件默认关，AGENT_PHASE_EVENTS 开启后前端可展示研究阶段
             emit_phases=os.getenv("AGENT_PHASE_EVENTS", "").strip().lower()
             in ("1", "true", "yes", "on"),
+            enable_intent=config.INTENT_ROUTING_ENABLED,
         )
         return StreamingResponse(
             stream_events(events, request.is_disconnected),
