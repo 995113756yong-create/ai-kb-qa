@@ -2,7 +2,7 @@
 
 // 会话列表侧栏卡片：＋新会话、按日期分组、重命名/删除、当前高亮。
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 
 import { groupConversations, conversationTitle } from "@/lib/conversations";
 import { cn } from "@/lib/utils";
@@ -31,11 +31,16 @@ export function ConversationList({
   const [draft, setDraft] = useState("");
   const groups = groupConversations(conversations);
 
-  useEffect(() => {
-    if (renamingId === null) return;
-    const c = conversations.find((x) => x.id === renamingId);
-    if (c) setDraft(conversationTitle(c));
-  }, [renamingId, conversations]);
+  // 进入重命名时用会话标题作初值。用「上一次的 renamingId」判断是否刚进入，
+  // 避免 effect 里无条件 setState（react-hooks/set-state-in-effect）。
+  const [prevRenamingId, setPrevRenamingId] = useState<string | null>(null);
+  if (renamingId !== prevRenamingId) {
+    setPrevRenamingId(renamingId);
+    if (renamingId !== null) {
+      const c = conversations.find((x) => x.id === renamingId);
+      if (c) setDraft(conversationTitle(c));
+    }
+  }
 
   const commitRename = () => {
     if (renamingId !== null) {

@@ -177,4 +177,51 @@ describe("ChatApp（新架构）", () => {
       expect(screen.getByPlaceholderText(/提问/)).toBeInTheDocument();
     });
   });
+
+  it("链接里的 ?c=<id> 优先恢复指定会话，而不是最近一条", async () => {
+    const mkConv = (id: string, title: string, text: string) => ({
+      id,
+      agentId: "default",
+      title,
+      messages: [{ id: `${id}-m`, role: "user", text, createdAt: 1 }],
+      updatedAt: 1,
+    });
+    // 列表把「较新」的 conv-new 放前面，指定恢复的 conv-old 在后面
+    localStorage.setItem(
+      "kbqa:conversations:default",
+      JSON.stringify([mkConv("conv-new", "新会话", "新会话内容"), mkConv("conv-old", "旧会话", "旧会话内容")]),
+    );
+
+    render(<ChatApp initialAgentId="default" initialConversationId="conv-old" />);
+
+    // 正文区的用户气泡应为旧会话内容；新会话内容只出现在侧栏列表里，不应进入正文
+    await waitFor(() => {
+      const bubbles = Array.from(document.querySelectorAll(".brand-gradient")).map(
+        (n) => n.textContent ?? "",
+      );
+      expect(bubbles).toContain("旧会话内容");
+      expect(bubbles).not.toContain("新会话内容");
+    });
+  });
+
+  it("指定的会话不存在时退回最近一条", async () => {
+    localStorage.setItem(
+      "kbqa:conversations:default",
+      JSON.stringify([
+        {
+          id: "conv-a",
+          agentId: "default",
+          title: "甲",
+          messages: [{ id: "a1", role: "user", text: "甲的内容", createdAt: 1 }],
+          updatedAt: 1,
+        },
+      ]),
+    );
+
+    render(<ChatApp initialAgentId="default" initialConversationId="不存在的-id" />);
+
+    await waitFor(() => {
+      expect(screen.getAllByText("甲的内容").length).toBeGreaterThan(0);
+    });
+  });
 });

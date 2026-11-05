@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+import threading
 import re
 import uuid
 from contextlib import asynccontextmanager
@@ -26,6 +27,20 @@ from app.document import KnowledgeBase, get_embeddings, load_and_split
 from app.qa import NOT_FOUND_ANSWER, QAService, get_llm
 from app.seed_agents import ensure_seed_agents
 from app.security import RateLimiter, client_key, require_admin
+
+_feedback_lock = threading.Lock()
+
+
+def _append_feedback(path: str, line: str, max_bytes: int) -> None:
+    """追加一行反馈；超过上限时把当前文件轮转成 .1（覆盖旧的 .1）。
+
+    磁盘占用最多约 2 倍上限：主文件 + 一个归档。
+    """
+    with _feedback_lock:
+        if max_bytes > 0 and os.path.exists(path) and os.path.getsize(path) >= max_bytes:
+            os.replace(path, path + ".1")
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(line)
 
 READ_BLOCK = 1024 * 1024
 DOC_ID_RE = re.compile(r"^[0-9a-f]{32}$")
@@ -226,8 +241,11 @@ def create_app(
             log_dir = store.log_dir_of(req.agent_id) if req.agent_id != DEFAULT_AGENT_ID else (
                 agent_log_dir or config.AGENT_LOG_DIR)
             os.makedirs(log_dir, exist_ok=True)
-            with open(os.path.join(log_dir, "feedback.jsonl"), "a", encoding="utf-8") as f:
-                f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+            _append_feedback(
+                os.path.join(log_dir, "feedback.jsonl"),
+                json.dumps(entry, ensure_ascii=False) + "\n",
+                int(config.FEEDBACK_MAX_MB * 1024 * 1024),
+            )
         except Exception:
             logger.warning("feedback 落盘失败", exc_info=True)
         return {"status": "ok"}

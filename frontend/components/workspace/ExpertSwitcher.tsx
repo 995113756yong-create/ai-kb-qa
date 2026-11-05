@@ -24,7 +24,6 @@ import {
 } from "@/components/ui/alert-dialog";
 import ExpertGallery from "@/components/workspace/ExpertGallery";
 import CreateExpertWizard from "@/components/workspace/CreateExpertWizard";
-import { cn } from "@/lib/utils";
 import type { AgentInfo } from "@/lib/types";
 import type { AgentCreateRequest } from "@/lib/types";
 

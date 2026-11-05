@@ -1,5 +1,7 @@
 import type { NextRequest } from "next/server";
 
+import { clientIpOf, trustedHops } from "@/lib/clientIp";
+
 // 转发层：浏览器只访问 Next.js，所有 /api/* 请求在这里转给 FastAPI。
 // 必须跑在 Node runtime，才能用 fetch 流式转发请求体和响应体。
 export const runtime = "nodejs";
@@ -43,14 +45,12 @@ async function proxy(req: NextRequest, ctx: Ctx): Promise<Response> {
 
   // 透传客户端真实 IP 给后端限流。
   // 容器里所有请求的 source 都是 Next.js pod，不传 XFF 后端就只能全站共享一个限流桶。
-  // 优先级与常见反代（nginx）一致：已有 XFF 就追加，否则用 x-real-ip。
-  const clientIp =
-    req.headers.get("x-forwarded-for")?.split(",")[0].trim() ||
-    req.headers.get("x-real-ip") ||
-    "";
+  //
+  // 只取可信代理追加的那一项，并「覆盖」而不是「追加」：
+  // XFF 最左侧的值由客户端自行决定，追加会让攻击者每次换 IP 拿到新限流桶。
+  const clientIp = clientIpOf(req.headers.get("x-forwarded-for"), trustedHops());
   if (clientIp) {
-    const existing = headers.get("x-forwarded-for");
-    headers.set("x-forwarded-for", existing ? `${existing}, ${clientIp}` : clientIp);
+    headers.set("x-forwarded-for", clientIp);
   }
 
   const hasBody = req.method !== "GET" && req.method !== "HEAD";

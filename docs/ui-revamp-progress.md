@@ -1,4 +1,7 @@
-# UI Revamp 进度（交接文档）
+# UI Revamp 实施记录（归档）
+
+> 本文记录 UI 升级的实施过程与当时的决策，已于 `00d22f8` 合入 main。
+> 后续工作见根目录 README 与 `docs/` 下的其他文档。
 
 分支：`feat/ui-revamp`（基于 main@9d994b2）
 方案：`docs/ui-revamp-plan.md`（898 行完整版）
@@ -71,12 +74,11 @@
 
 `lib/evalTypes.ts` 与 `lib/evalSummary.ts` 已按此对齐（`pct`、`modeRows`、`categoryRates`、`failedCases`）。
 
-## 遗留事项
+## 状态
 
-- **PR 未创建**：`gh` 未认证且无 GitHub token。分支已推送，可直接访问
-  https://github.com/995113756yong-create/ai-kb-qa/pull/new/feat/ui-revamp
-- `eval-summary.json` 只有 strict/reference 两种模式的 36 条用例，`by_category` 分类较少（compare/derived/fact 等）
-- Sealos 前端已停服，重新部署后才能看到线上效果
+- 已通过合并提交 `00d22f8` 合入 main（含后端 B1-B8 与前端全量改造）
+- 线上效果需重新部署 Sealos 前端；本地 `docker compose up -d` 可直接查看
+- `eval-summary.json` 目前是 strict/reference 两种模式的 36 条用例
 
 ## 常用命令
 

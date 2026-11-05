@@ -82,16 +82,19 @@ ai-kb-qa/
 │   │   ├── qa.py               # 固定 RAG 链与 QAService
 │   │   ├── mcp_server.py       # MCP Server（JSON-RPC 2.0 over stdio）
 │   │   ├── agent_store.py      # 多专家存储（每专家独立知识库）
+│   │   ├── security.py         # 写接口鉴权 + 问答限流（滑动窗口 + 桶清理）
 │   │   ├── seed_agents.py      # 内置专家播种（健身教练 + 语料）
 │   │   ├── main.py             # 应用工厂 create_app + 全部 HTTP 接口
 │   │   └── agent/
 │   │       ├── llm.py          # AgentLLM 协议 + OpenAI 兼容实现
 │   │       ├── tools.py        # 工具定义（JSON Schema）与执行
-│   │       ├── evidence.py     # 证据登记表与引用校验
+│   │       ├── evidence.py     # 证据登记表与引用校验（含「未找到」句去引用）
+│   │       ├── intent.py       # 规则意图分流（闲聊 / 列文档 / 编号类预检索）
+│   │       ├── attribution.py  # 句子级溯源分类 + 数字一致性（放行显式算式）
 │   │       ├── query_rewrite.py # 复合问题拆解（默认关闭）
 │   │       ├── rerank.py       # LLM 二次排序（默认关闭）
 │   │       ├── prompts.py      # 系统提示词与回答提示词
-│   │       ├── runner.py       # ReAct 循环，产出事件流
+│   │       ├── runner.py       # ReAct 循环，产出事件流（含停止时补写日志）
 │   │       └── sse.py          # 事件 → SSE 文本、心跳、断连检测
 │   ├── tests/                  # pytest（假 Embedding / 假 LLM，不访问外网）
 │   ├── Dockerfile
@@ -101,9 +104,16 @@ ai-kb-qa/
 │   ├── app/
 │   │   ├── layout.tsx
 │   │   ├── page.tsx            # 只渲染 <ChatApp />
-│   │   └── api/[...path]/route.ts   # 转发层
-│   ├── components/             # ChatApp / DocSidebar / MessageList / AgentTrace / AnswerView / SourceCards / ChatInput
-│   ├── lib/                    # types / api / sse / chat
+│   │   ├── experts/page.tsx    # 专家画廊独立页
+│   │   ├── eval/page.tsx       # 评测看板（读构建期 eval-summary.json）
+│   │   └── api/[...path]/route.ts   # 转发层（覆盖 XFF 为可信 IP）
+│   ├── components/
+│   │   ├── *.tsx               # ChatApp / MessageList / AgentTrace / AnswerView / ChatInput
+│   │   ├── workspace/          # 工作台组件（侧栏 / 专家切换 / 出处面板 / 信任环等）
+│   │   └── ui/                 # shadcn 基础组件
+│   ├── hooks/                  # useAgents / useDocs / useHotkeys / useElapsed
+│   ├── lib/                    # types / api / sse / chat / store / useAgentRun / clientIp ...
+│   ├── data/eval-summary.json  # 评测看板数据（构建期生成）
 │   ├── __tests__/              # vitest
 │   └── Dockerfile
 ├── eval/                       # 评测集：端到端 + 检索层隔离测试
@@ -111,7 +121,11 @@ ai-kb-qa/
 │   ├── retrieval_probes.jsonl
 │   ├── corpus.py
 │   ├── run_eval.py
-│   └── bench_retrieval.py
+│   ├── judge.py                # LLM-as-judge（已设 timeout / max_retries）
+│   ├── calibrate_threshold.py  # 证据门槛校准
+│   ├── bench_retrieval.py
+│   └── report.md               # 最近的评测报告
+├── docs/                       # 设计与实施文档
 ├── docker-compose.yml          # 本地构建
 ├── docker-compose.prod.yml     # 拉取 GHCR 现成镜像
 ├── .github/workflows/docker-publish.yml
@@ -195,19 +209,24 @@ npm run dev                     # 访问 http://localhost:3000
 | `DEFAULT_AGENT_ANSWER_MODE` | `strict` | 默认专家回答模式（strict / reference） |
 | `ADMIN_TOKEN` | 空 | 管理员口令：设置后写接口需要 X-Admin-Token 头 |
 | `RATE_LIMIT_PER_MIN` | `10` | 问答限流：每客户端每分钟请求数，0 关闭 |
-| `TRUST_PROXY` | `false` | 是否信任 X-Forwarded-For（转发部署必须 true） |
+| `TRUST_PROXY` | `false` | 是否信任 X-Forwarded-For（转发部署必须 true）。开启时取 XFF **最右侧**一项，左侧由客户端控制不可信 |
 | `LLM_STREAM_USAGE` | `true` | 流式回答请求 usage 统计；不支持时设 false |
 | `JUDGE_MODEL` / `JUDGE_API_BASE` / `JUDGE_API_KEY` | 复用 OPENAI_* | LLM-as-judge 评判模型（建议与生成模型不同） |
 | `PRICE_INPUT_PER_M` / `PRICE_OUTPUT_PER_M` | 空 | 评测费用估算（元/百万 token） |
 | `AGENTS_DIR` | `backend/agents_store` | 多专家存储根目录（每专家一个子目录） |
 | `MAX_UPLOAD_MB` | `10` | 单文件上传上限 |
 | `TOP_K` | `3` | 固定 RAG 的检索片段数 |
+| `LLM_TIMEOUT_SECONDS` | `60` | 模型调用超时（秒）。流式回答是两 chunk 之间的读超时 |
+| `LLM_MAX_RETRIES` | `1` | 模型 / Embedding 调用失败重试次数上限 |
+| `EMBEDDING_TIMEOUT_SECONDS` | `30` | Embedding 调用超时（秒） |
+| `FEEDBACK_MAX_MB` | `5` | 反馈文件上限（MB），超过后轮转为 `feedback.jsonl.1` |
 
 ### 前端 `frontend/.env`
 
 | 变量 | 默认值 | 说明 |
 |------|--------|------|
 | `BACKEND_URL` | `http://localhost:8000` | 转发层的后端地址，**运行时**读取，可在部署时切换 |
+| `TRUSTED_PROXY_HOPS` | `1` | Next.js 前面会追加 XFF 的可信代理层数；限流只认右数第 N 项，左侧不可信 |
 
 ## 接口
 
@@ -326,7 +345,7 @@ npm run dev                     # 访问 http://localhost:3000
 
 ### 6. 运行日志如何服务评测
 
-每个请求结束（成功或失败）都向 `AGENT_LOG_DIR/agent_runs.jsonl` 追加一行：
+每个请求结束都向 `AGENT_LOG_DIR/agent_runs.jsonl` 追加一行，包括成功、失败，以及用户点「停止」或浏览器断连的请求。停止的记录多一个 `"stopped": true` 字段，`answer` 是已经生成的部分回答，`evidence_count` 为 null（中途关闭时还没扫完证据）：
 
 ```json
 {
@@ -752,6 +771,7 @@ deploy（rollout restart；ai-kb-qa-web 不存在时跳过，不让 job 失败�
 
 - 后端镜像 `ghcr.io/995113756yong-create/ai-kb-qa:latest`，容器端口 8000，需要环境变量 `OPENAI_API_KEY` 和 `AGENT_MODEL`，并给 `/app/backend/uploads`、`/app/backend/faiss_index` 挂载持久卷
 - 前端镜像 `ghcr.io/995113756yong-create/ai-kb-qa-web:latest`，容器端口 3000，开启公网访问，环境变量 `BACKEND_URL=http://ai-kb-qa:8000`（以 Sealos 控制台显示的内网地址为准）
+- **后端 Service 不要配置公网 Ingress**：只允许前端在集群内访问。后端限流依赖 `TRUST_PROXY=true` 取 XFF 判断客户端 IP，一旦后端可被公网直连，客户端就能自行伪造 X-Forwarded-For 绕过限流。本地 `docker-compose.prod.yml` 已把后端端口绑到 `127.0.0.1`。
 
 ### 从 GHCR 拉镜像运行（不本地构建）
 

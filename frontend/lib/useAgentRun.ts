@@ -6,7 +6,7 @@ import type { ChatMessage, Phase, Step } from "@/lib/chat";
 import { advancePhase } from "@/lib/chat";
 import { streamAgent } from "@/lib/api";
 import { stripRawCitations } from "@/lib/answer";
-import type { AgentEvent, UsageInfo } from "@/lib/types";
+import type { AgentEvent } from "@/lib/types";
 
 // 一次 Agent 运行的编排器：把 SSE 事件归约成消息状态。
 // 流式 answer_delta 先入缓冲区，requestAnimationFrame 每帧最多刷新一次；
@@ -100,7 +100,8 @@ export function useAgentRun(options: Options = {}) {
       // 交互模式（agent|fast）与回答模式（strict|reference）是两层概念：
       // fast 在 ChatApp 层走 ask()；这里只处理 agent 流式，
       // 专家配置的 answerMode 由 StreamAgentOptions.mode 透传给后端。
-      const { mode: _interactionMode, answerMode, ...streamRest } = rest;
+      const { answerMode } = rest;
+      const streamRest = rest;
 
       let current: ChatMessage & { role: "assistant" } = {
         id: newId(),

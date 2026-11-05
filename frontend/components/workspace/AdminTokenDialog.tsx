@@ -3,7 +3,7 @@
 // 管理员令牌录入对话框：首次访问需要 admin 权限的接口时弹出。
 // 令牌存 localStorage（key: kb-admin-token），不落 URL。
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 
 import {
   AlertDialog,
@@ -28,9 +28,13 @@ export const ADMIN_TOKEN_KEY = "kb-admin-token";
 export function AdminTokenDialog({ open, onSave, onCancel }: AdminTokenDialogProps) {
   const [value, setValue] = useState("");
 
-  useEffect(() => {
+  // 打开时从本地读一次初值。用「上一次的 open」判断是否刚打开，
+  // 避免 effect 里无条件 setState（react-hooks/set-state-in-effect）。
+  const [prevOpen, setPrevOpen] = useState(open);
+  if (open !== prevOpen) {
+    setPrevOpen(open);
     if (open) setValue(lsGet(ADMIN_TOKEN_KEY) ?? "");
-  }, [open]);
+  }
 
   return (
     <AlertDialog open={open}>

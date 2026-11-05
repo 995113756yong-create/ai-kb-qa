@@ -29,7 +29,13 @@ NOT_FOUND_ANSWER = "文档中未找到相关信息。"
 DEFAULT_MODES = ["strict", "reference"]
 
 # reference 模式下拒答判定的宽松匹配（开头声明来源即可）
-REJECT_DECLAIM_RE = re.compile(r"(知识库|文档)中?(暂无|没有|未找到)")
+# 与 backend/app/agent/evidence.py 的 ABSENCE_RE 保持一致（eval 不导入 app 包，
+# 这里复制一份，改一边要同步另一边），另外认「一般知识」类声明。
+REJECT_DECLAIM_RE = re.compile(
+    r"(知识库|文档|证据|资料)[^。！？!?；;\n]{0,12}?"
+    r"(未出现|未找到|未提及|未包含|未覆盖|没有|暂无|不包含)"
+    r"|非知识库内容|基于一般知识"
+)
 
 # 20 条内置离题负例（阈值校准用）
 OFFTOPIC = [

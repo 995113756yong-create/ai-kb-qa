@@ -6,6 +6,7 @@ from langchain_core.language_models import BaseChatModel
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 
+from app import config
 from app.config import CHAT_MODEL, OPENAI_API_BASE, OPENAI_API_KEY, TOP_K
 from app.document import KnowledgeBase
 
@@ -34,9 +35,13 @@ def get_llm() -> BaseChatModel:
 
     return ChatOpenAI(
         model=CHAT_MODEL,
-        openai_api_key=OPENAI_API_KEY,
-        openai_api_base=OPENAI_API_BASE,
+        # 运行时读 config 而不是 from-import 的常量：
+        # from-import 在模块加载时就把值复制绑定，之后改 config 影响不到这里
+        openai_api_key=config.OPENAI_API_KEY,
+        openai_api_base=config.OPENAI_API_BASE,
         temperature=0.1,
+        timeout=config.LLM_TIMEOUT_SECONDS,
+        max_retries=config.LLM_MAX_RETRIES,
     )
 
 
