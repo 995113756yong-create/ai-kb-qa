@@ -92,6 +92,27 @@ def test_reject_reference_requires_declaim_and_no_sources():
     assert judge_answer(REJECT_CASE, bad2) is False  # 拒答不该有 sources
 
 
+def test_reject_reference_accepts_general_knowledge_declaration():
+    """prompt 允许「以下为一般知识，非知识库内容」这种声明，评测口径要对齐."""
+    ok = _result(
+        REJECT_CASE, "reference",
+        answer="以下为一般知识，非知识库内容。量子纠缠是一种量子力学现象……",
+        sources=[], grounded_ratio=0,
+    )
+    assert judge_answer(REJECT_CASE, ok) is True
+
+
+def test_reject_reference_accepts_absence_wording_variants():
+    """「证据中未出现」「资料不包含」等措辞都要认."""
+    for wording in [
+        "知识库证据中未出现该产品的月费信息，以下回答基于一般知识。",
+        "现有资料不包含这项配置，以下回答基于一般知识。",
+        "文档里未提及该字段，以下回答基于一般知识。",
+    ]:
+        r = _result(REJECT_CASE, "reference", answer=wording, sources=[], grounded_ratio=0)
+        assert judge_answer(REJECT_CASE, r) is True, f"未识别: {wording}"
+
+
 def test_mixed_strict_requires_not_found_mention():
     case = {"id": "x1", "category": "mixed", "question": "q", "expect_keywords": ["30"]}
     ok = _result(case, "strict", answer="产品A月费 30 元 [1]。其余部分文档中未找到相关信息。")
