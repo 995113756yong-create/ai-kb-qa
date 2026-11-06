@@ -393,7 +393,14 @@ export default function ChatApp({ initialAgentId, initialConversationId }: Props
         {/* 消息区 */}
         <div className="flex min-h-0 flex-1">
           <div className="flex min-w-0 flex-1 flex-col">
-            <MessageList messages={messages} onJumpToSource={jumpToSource} />
+            <MessageList
+              messages={messages}
+              onJumpToSource={jumpToSource}
+              starters={activeAgent?.starter_questions}
+              onPickStarter={(q) => send(q)}
+              agentName={activeAgent?.name}
+              docCount={docs.length}
+            />
             {mode === "fast" && messages.length > 0 ? (
               <div className="flex items-center justify-center gap-1.5 border-t border-border/60 bg-muted/30 px-4 py-1.5 text-[11px] text-muted-foreground">
                 快速模式不理解上下文，追问请切换到 Agent 模式

@@ -10,18 +10,55 @@ import type { ChatMessage } from "@/lib/chat";
 type Props = {
   messages: ChatMessage[];
   onJumpToSource: (messageId: string, index: number) => void;
+  /** 空状态的推荐问题；点击直接发送 */
+  starters?: string[];
+  onPickStarter?: (question: string) => void;
+  /** 空状态展示的专家名与文档数 */
+  agentName?: string;
+  docCount?: number;
 };
 
-export default function MessageList({ messages, onJumpToSource }: Props) {
+export default function MessageList({
+  messages,
+  onJumpToSource,
+  starters,
+  onPickStarter,
+  agentName,
+  docCount,
+}: Props) {
   if (messages.length === 0) {
     // 空状态撑满消息区，保证输入框稳定贴在底部
+    const hasStarters = (starters?.length ?? 0) > 0 && onPickStarter;
     return (
-      <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 px-6 text-center">
-        <div className="text-3xl">💬</div>
-        <p className="text-sm font-medium">开始一次对话</p>
-        <p className="max-w-sm text-xs text-muted-foreground">
-          选择一个专家，然后提问。回答会标注知识库依据与数字溯源性。
-        </p>
+      <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-4 px-6 text-center">
+        <div className="text-3xl">{agentName ? "💬" : "📚"}</div>
+
+        <div className="space-y-1">
+          <p className="text-sm font-medium">
+            {agentName ? `向「${agentName}」提问` : "开始一次对话"}
+          </p>
+          <p className="max-w-sm text-xs text-muted-foreground">
+            {typeof docCount === "number" && docCount > 0
+              ? `已索引 ${docCount} 份文档。回答会标注知识库依据与数字溯源性，点引用编号可查看原文位置。`
+              : "先上传文档，再提问。回答会标注知识库依据与数字溯源性。"}
+          </p>
+        </div>
+
+        {hasStarters ? (
+          <div className="flex w-full max-w-lg flex-col gap-2" data-testid="starter-questions">
+            <p className="text-[11px] text-muted-foreground">试试这样问</p>
+            {starters!.slice(0, 4).map((q) => (
+              <button
+                key={q}
+                type="button"
+                onClick={() => onPickStarter!(q)}
+                className="rounded-lg border border-border/60 bg-card px-3 py-2 text-left text-[13px] leading-relaxed text-foreground transition-colors hover:border-primary/40 hover:bg-muted/50"
+              >
+                {q}
+              </button>
+            ))}
+          </div>
+        ) : null}
       </div>
     );
   }
