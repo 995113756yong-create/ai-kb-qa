@@ -11,6 +11,7 @@ import CommandPalette from "@/components/CommandPalette";
 import MessageList from "@/components/MessageList";
 import AppSidebar from "@/components/workspace/AppSidebar";
 import { AdminTokenDialog } from "@/components/workspace/AdminTokenDialog";
+import { EvidenceDrawer } from "@/components/workspace/EvidenceDrawer";
 import { EvidenceReader } from "@/components/workspace/EvidenceReader";
 import { toast } from "sonner";
 
@@ -312,6 +313,28 @@ export default function ChatApp({ initialAgentId, initialConversationId }: Props
   );
   useHotkeys(hotkeys);
 
+  // ---------- 证据阅读器 ----------
+  const evidenceMessage = evidence
+    ? messages.find(
+        (m): m is ChatMessage & { role: "assistant" } =>
+          m.id === evidence.messageId && m.role === "assistant",
+      )
+    : undefined;
+
+  const handleSelectEvidence = useCallback(
+    (next: number) => {
+      setEvidence((prev) => (prev ? { ...prev, n: next } : prev));
+    },
+    [],
+  );
+
+  const handleFocusSentence = useCallback(
+    (i: number) => {
+      if (evidence) focusSentence(evidence.messageId, i);
+    },
+    [evidence, focusSentence],
+  );
+
   // ---------- 渲染 ----------
   return (
     <div className="flex h-dvh w-full overflow-hidden bg-background text-foreground">
@@ -416,25 +439,35 @@ export default function ChatApp({ initialAgentId, initialConversationId }: Props
             <ChatInput disabled={false} running={running} onSend={send} onStop={stop} />
           </div>
 
-          {/* 证据侧栏 */}
-          {evidence && (() => {
-            const evidenceMessage = messages.find(
-              (m): m is ChatMessage & { role: "assistant" } => m.id === evidence.messageId && m.role === "assistant",
-            );
-            if (!evidenceMessage) return null;
-            return (
-              <aside className="hidden w-96 shrink-0 overflow-y-auto border-l border-border/60 lg:block">
+          {/* 证据侧栏：桌面右侧栏；移动端走底部抽屉（同一个阅读器组件） */}
+          {evidenceMessage && (
+            <>
+              <aside className="hidden w-96 shrink-0 overflow-hidden border-l border-border/60 lg:block">
                 <EvidenceReader
                   message={evidenceMessage}
-                  n={evidence.n}
-                  onSelect={(next) => setEvidence({ messageId: evidence.messageId, n: next })}
-                  onFocusSentence={(i) => focusSentence(evidence.messageId, i)}
+                  n={evidence!.n}
+                  onSelect={handleSelectEvidence}
+                  onFocusSentence={handleFocusSentence}
                   agentId={activeAgentId}
                   onClose={() => setEvidence(null)}
+                  className="h-full"
                 />
               </aside>
-            );
-          })()}
+
+              <EvidenceDrawer
+                open
+                onOpenChange={(open) => {
+                  if (!open) setEvidence(null);
+                }}
+                message={evidenceMessage}
+                n={evidence!.n}
+                onSelect={handleSelectEvidence}
+                onFocusSentence={handleFocusSentence}
+                agentId={activeAgentId}
+                onClose={() => setEvidence(null)}
+              />
+            </>
+          )}
         </div>
       </main>
 
