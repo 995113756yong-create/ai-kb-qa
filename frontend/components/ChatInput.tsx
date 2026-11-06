@@ -1,6 +1,7 @@
 "use client";
 
 import { useRef } from "react";
+import { useI18n } from "@/lib/i18n";
 
 type Props = {
   disabled: boolean;
@@ -10,6 +11,7 @@ type Props = {
 };
 
 export default function ChatInput({ disabled, running, onSend, onStop }: Props) {
+  const { t } = useI18n();
   const ref = useRef<HTMLTextAreaElement>(null);
 
   function submit() {
@@ -29,8 +31,8 @@ export default function ChatInput({ disabled, running, onSend, onStop }: Props) 
         ref={ref}
         rows={2}
         disabled={disabled}
-        placeholder={disabled ? "请先上传文档" : "提问…（Enter 发送，Shift+Enter 换行）"}
-        aria-label="提问输入框"
+        placeholder={disabled ? t("chat.uploadFirst") : t("chat.placeholder")}
+        aria-label={t("chat.inputLabel")}
         data-testid="chat-input"
         onKeyDown={(event) => {
           // 输入法组字时的 Enter 是候选词确认，不能当成发送
@@ -50,7 +52,7 @@ export default function ChatInput({ disabled, running, onSend, onStop }: Props) 
         } disabled:opacity-50 disabled:active:scale-100`}
         disabled={!running && disabled}
       >
-        {running ? "停止" : "发送"}
+        {running ? t("chat.stop") : t("chat.send")}
       </button>
     </div>
   );

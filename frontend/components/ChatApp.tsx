@@ -11,6 +11,9 @@ import CommandPalette from "@/components/CommandPalette";
 import MessageList from "@/components/MessageList";
 import AppSidebar from "@/components/workspace/AppSidebar";
 import { AdminTokenDialog } from "@/components/workspace/AdminTokenDialog";
+import LanguageToggle from "@/components/LanguageToggle";
+import ThemeToggle from "@/components/ThemeToggle";
+import { useI18n } from "@/lib/i18n";
 import { EvidenceDrawer } from "@/components/workspace/EvidenceDrawer";
 import { EvidenceReader } from "@/components/workspace/EvidenceReader";
 import { toast } from "sonner";
@@ -30,6 +33,8 @@ type Props = {
 };
 
 export default function ChatApp({ initialAgentId, initialConversationId }: Props) {
+  const { t } = useI18n();
+
   // ---------- 基础状态 ----------
   const [activeAgentId, setActiveAgentId] = useState(initialAgentId);
   const [agents, setAgents] = useState<AgentInfo[]>([]);
@@ -369,7 +374,7 @@ export default function ChatApp({ initialAgentId, initialConversationId }: Props
         <header className="flex h-14 shrink-0 items-center gap-2 border-b border-border/60 px-4">
           <button
             type="button"
-            aria-label="折叠侧栏"
+            aria-label={t("nav.settings")}
             className="rounded-md p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground"
             onClick={() => setSidebarOpen((v) => !v)}
           >
@@ -377,14 +382,14 @@ export default function ChatApp({ initialAgentId, initialConversationId }: Props
           </button>
           <div className="min-w-0">
             <p className="truncate text-sm font-medium leading-tight">
-              {activeAgent?.name ?? "知识库问答"}
+              {activeAgent?.name ?? t("nav.knowledge")}
             </p>
             {activeAgent?.description && (
               <p className="truncate text-xs text-muted-foreground">{activeAgent.description}</p>
             )}
           </div>
           <div className="ml-auto flex items-center gap-2">
-            <div className="flex rounded-lg border border-border/60 p-0.5" role="group" aria-label="交互模式">
+            <div className="flex rounded-lg border border-border/60 p-0.5" role="group" aria-label={t("chat.modeAgent")}>
               <button
                 type="button"
                 aria-pressed={mode === "agent"}
@@ -399,12 +404,14 @@ export default function ChatApp({ initialAgentId, initialConversationId }: Props
                 className={`rounded-md px-2.5 py-1 text-xs font-medium transition-colors ${mode === "fast" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}
                 onClick={() => setMode("fast")}
               >
-                快速
+                {t("chat.modeFast")}
               </button>
             </div>
+            <LanguageToggle />
+            <ThemeToggle />
             <button
               type="button"
-              aria-label="新建会话"
+              aria-label={t("nav.newChat")}
               className="rounded-md p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground"
               onClick={newChat}
             >
