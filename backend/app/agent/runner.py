@@ -9,6 +9,8 @@ from app.config import AGENT_LOG_DIR, AGENT_MAX_STEPS, AGENT_SEARCH_K
 from app.document import KnowledgeBase
 from app.agent.attribution import Attribution, attribute
 from app.agent.evidence import EvidenceRegistry
+from app import config
+from app.agent.contextualize import contextualize
 from app.agent.llm import AgentLLM, AssistantTurn, Usage
 from app.agent.prompts import (
     CHAT_PROMPT,
@@ -93,6 +95,7 @@ def final(
     grounded_ratio: Optional[float] = None,
     segments: Optional[List[dict]] = None,
     usage: Optional[dict] = None,
+    rewritten_question: Optional[str] = None,
 ) -> dict:
     event = {
         "type": "final",
@@ -217,12 +220,20 @@ def _answer_chat(
     mode: str = "reference",
     persona: str = "",
     meter: Optional[_UsageMeter] = None,
+    history: Optional[List[dict]] = None,
 ):
-    """闲聊分流：不带工具、不检索，一次流式调用直接回复。"""
-    messages = [
-        {"role": "system", "content": with_persona(CHAT_PROMPT, persona)},
-        {"role": "user", "content": question},
-    ]
+    """闲聊分流：不带工具、不检索，一次流式调用直接回复。
+
+    history 只作为对话上下文插入，让“谢谢你刚才的解释”这类话能自然接上；
+    闲聊不检索、不引用，不影响证据边界。
+    """
+    messages = [{"role": "system", "content": with_persona(CHAT_PROMPT, persona)}]
+    for turn in (history or [])[-config.CONTEXTUALIZE_MAX_TURNS * 2:]:
+        role = turn.get("role")
+        content = (turn.get("content") or "").strip()
+        if role in ("user", "assistant") and content:
+            messages.append({"role": role, "content": content})
+    messages.append({"role": "user", "content": question})
     raw = ""
     try:
         for delta in llm.stream(messages):
@@ -322,6 +333,7 @@ def _run_agent_impl(
     answer_mode: str = "reference",
     emit_phases: bool = False,
     enable_intent: bool = False,
+    history: Optional[List[dict]] = None,
 ) -> Iterator[dict]:
     """产出事件流的同步生成器，由 SSE 层包装成异步响应。
 
@@ -357,14 +369,35 @@ def _run_agent_impl(
     def elapsed() -> int:
         return int((time.monotonic() - started) * 1000)
 
+    history = history or []
+    original_question = question
+    rewritten: Optional[str] = None
+
+    # 闲聊判断用原话（“谢谢”“你好”不需要改写）
     intent = None
     if enable_intent:
         intent = classify(question)
-        yield {"type": "intent", "intent": intent.intent, "reason": intent.reason}
         if intent.intent == CHAT:
+            # 闲聊分支在改写之前就 yield 并返回，保证 intent 事件只发一次
+            yield {"type": "intent", "intent": intent.intent, "reason": intent.reason}
             yield from _answer_chat(question, llm, registry, agent_id, elapsed, log_dir, steps,
-                                    mode=answer_mode, persona=persona, meter=meter)
+                                    mode=answer_mode, persona=persona, meter=meter,
+                                    history=history)
+
             return
+
+    # 多轮改写：只改检索用的 question，研究与回答 prompt 一行不改，证据边界不变
+    if config.CONTEXTUALIZE_ENABLED and history:
+        rewritten = contextualize(llm, question, history, config.CONTEXTUALIZE_MAX_TURNS)
+        if rewritten:
+            yield {"type": "rewrite", "original": original_question, "rewritten": rewritten}
+            question = rewritten
+            # 改写后重新分流：例如“那 9999 呢”会变成编号类查询
+            if enable_intent:
+                intent = classify(question)
+
+    if enable_intent and intent is not None:
+        yield {"type": "intent", "intent": intent.intent, "reason": intent.reason}
         if intent.intent == LIST_DOCS:
             yield from _answer_list_docs(question, kb, registry, agent_id, elapsed, log_dir, steps,
                                          mode=answer_mode, meter=meter)
@@ -376,9 +409,10 @@ def _run_agent_impl(
             yield {"type": "answer_delta", "text": NOT_FOUND_ANSWER}
             _write_run_log(log_dir, question, steps, registry, NOT_FOUND_ANSWER, True, elapsed(),
                            mode="strict", grounded_ratio=None, numeric_warnings=0,
-                           usage=meter.snapshot())
+                           usage=meter.snapshot(), rewritten_question=rewritten)
             yield final(NOT_FOUND_ANSWER, [], True, 0, elapsed(), agent_id, mode="strict",
-                        grounded_ratio=None, segments=[], usage=meter.snapshot())
+                        grounded_ratio=None, segments=[], usage=meter.snapshot(),
+                rewritten_question=rewritten,)
             return
         # reference：模型自身知识回答 + attribution
         yield from _answer_without_evidence(
@@ -521,9 +555,10 @@ def _run_agent_impl(
                 yield {"type": "answer_delta", "text": NOT_FOUND_ANSWER}
                 _write_run_log(log_dir, question, steps, registry, NOT_FOUND_ANSWER, True, elapsed(),
                                mode="strict", grounded_ratio=None, numeric_warnings=0,
-                               usage=meter.snapshot())
+                               usage=meter.snapshot(), rewritten_question=rewritten)
                 yield final(NOT_FOUND_ANSWER, [], True, step, elapsed(), agent_id, mode="strict",
-                            grounded_ratio=None, segments=[], usage=meter.snapshot())
+                            grounded_ratio=None, segments=[], usage=meter.snapshot(),
+                rewritten_question=rewritten,)
                 return
             # reference：兜底回答 + attribution
             yield from _answer_without_evidence(
@@ -544,15 +579,16 @@ def _run_agent_impl(
             # strict 模式下的合规拒答：有依据比例无意义
             _write_run_log(log_dir, question, steps, registry, answer, True, used_ms,
                            mode="strict", grounded_ratio=None, numeric_warnings=0,
-                           usage=meter.snapshot())
+                           usage=meter.snapshot(), rewritten_question=rewritten)
             yield final(answer, sources, True, step, used_ms, agent_id, mode="strict",
-                        grounded_ratio=None, segments=[], usage=meter.snapshot())
+                        grounded_ratio=None, segments=[], usage=meter.snapshot(),
+                rewritten_question=rewritten,)
             return
         _write_run_log(
             log_dir, question, steps, registry, answer, att.grounded, used_ms,
             mode=answer_mode, grounded_ratio=att.grounded_ratio,
             numeric_warnings=att.numeric_warnings,
-            usage=meter.snapshot(),
+            usage=meter.snapshot(), rewritten_question=rewritten
         )
         yield final(
             answer, sources, att.grounded, step, used_ms, agent_id,
@@ -560,12 +596,13 @@ def _run_agent_impl(
             grounded_ratio=att.grounded_ratio,
             segments=_segments_payload(att),
             usage=meter.snapshot(),
+                rewritten_question=rewritten,
         )
     except Exception as e:
         # API Key 和堆栈只进服务端日志，前端只看到一句人话
         logger.exception("Agent 运行失败")
         # 先写日志再 yield：yield 之后前端可能立刻断开，生成器就不再往下走了
-        _write_run_log(log_dir, question, steps, registry, "", False, elapsed(), error=str(e))
+        _write_run_log(log_dir, question, steps, registry, "", False, elapsed(), error=str(e), rewritten_question=rewritten)
         yield {"type": "error", "detail": f"大模型调用失败：{type(e).__name__}"}
 
 
@@ -586,6 +623,7 @@ def run_agent(
     answer_mode: str = "reference",
     emit_phases: bool = False,
     enable_intent: bool = False,
+    history: Optional[List[dict]] = None,
 ) -> Iterator[dict]:
     """对外入口。用户停止或断连时（生成器被 close），补写一条 stopped 运行日志。
 
@@ -609,6 +647,7 @@ def run_agent(
         answer_mode=answer_mode,
         emit_phases=emit_phases,
         enable_intent=enable_intent,
+        history=history,
     )
     finished = False
     partial: List[str] = []
@@ -657,6 +696,7 @@ def _write_run_log(
     usage: Optional[dict] = None,
     intent: str = "",
     stopped: bool = False,
+    rewritten_question: Optional[str] = None,
 ) -> None:
     """追加一行运行记录，供后续评测离线分析；写失败不影响响应。"""
     if not log_dir:
@@ -679,6 +719,8 @@ def _write_run_log(
     if stopped:
         # 只有被用户停止 / 断连时才写这个字段，正常结束的日志结构保持不变
         record["stopped"] = True
+    if rewritten_question:
+        record["rewritten_question"] = rewritten_question
     if error:
         record["error"] = error
     try:

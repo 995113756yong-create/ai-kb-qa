@@ -54,11 +54,20 @@ class AskRequest(BaseModel):
     agent_id: str = Field(DEFAULT_AGENT_ID, max_length=32)
 
 
+class HistoryTurn(BaseModel):
+    """一轮历史消息。只用于把追问改写成独立问题，不进入研究与回答阶段。"""
+
+    role: Literal["user", "assistant"]
+    content: str = Field(..., min_length=1, max_length=2000)
+
+
 class AgentRequest(BaseModel):
     question: str = Field(..., min_length=1, max_length=1000)
     agent_id: str = Field(DEFAULT_AGENT_ID, max_length=32)
     # 请求级模式覆盖（评测用）：传了就覆盖专家配置
     answer_mode: Opt[Literal["strict", "reference"]] = None
+    # 多轮：最近几轮对话（按时间正序），只用于把追问改写成独立问题
+    history: List[HistoryTurn] = Field(default_factory=list, max_length=12)
 
 
 class AgentCreateRequest(BaseModel):
@@ -479,6 +488,7 @@ def create_app(
             persona=persona,
             agent_id=effective_agent_id,
             answer_mode=mode,
+            history=[h.model_dump() for h in req.history],
             # B8：phase 事件默认关，AGENT_PHASE_EVENTS 开启后前端可展示研究阶段
             emit_phases=os.getenv("AGENT_PHASE_EVENTS", "").strip().lower()
             in ("1", "true", "yes", "on"),

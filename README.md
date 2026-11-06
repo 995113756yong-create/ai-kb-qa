@@ -220,6 +220,8 @@ npm run dev                     # 访问 http://localhost:3000
 | `LLM_MAX_RETRIES` | `1` | 模型 / Embedding 调用失败重试次数上限 |
 | `EMBEDDING_TIMEOUT_SECONDS` | `30` | Embedding 调用超时（秒） |
 | `FEEDBACK_MAX_MB` | `5` | 反馈文件上限（MB），超过后轮转为 `feedback.jsonl.1` |
+| `CONTEXTUALIZE_ENABLED` | `true` | 多轮追问改写开关；有历史且问题像追问时才改写 |
+| `CONTEXTUALIZE_MAX_TURNS` | `3` | 送进改写 prompt 的历史轮数上限 |
 
 ### 前端 `frontend/.env`
 
