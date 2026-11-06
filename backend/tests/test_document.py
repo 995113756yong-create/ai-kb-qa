@@ -26,12 +26,15 @@ def test_split_attaches_metadata(tmp_path):
     chunks = load_and_split(path, doc_id="d1", source="原始文件名.txt")
     assert len(chunks) > 1
     for i, c in enumerate(chunks):
+        # start/end 是 v2.1 新增的片段偏移，阅读器按它高亮原文
         assert c.metadata == {
             "doc_id": "d1",
             "source": "原始文件名.txt",
             "page": None,
             "chunk_index": i,
             "chunk_id": f"d1:{i}",
+            "start": c.metadata["start"],
+            "end": c.metadata["end"],
         }
         assert len(c.page_content) <= 500
 

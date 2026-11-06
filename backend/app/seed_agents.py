@@ -246,7 +246,7 @@ def ensure_seed_agents(store) -> List[str]:
 
 
 def _seed_fitness_corpus(store, kb) -> None:
-    from app.document import load_and_split
+    from app.document import load_and_split_with_pages
 
     upload_dir = store.upload_dir_of(FITNESS_AGENT_ID)
     os.makedirs(upload_dir, exist_ok=True)
@@ -257,6 +257,6 @@ def _seed_fitness_corpus(store, kb) -> None:
         with open(path, "w", encoding="utf-8") as f:
             f.write(text)
         doc_id = uuid.uuid4().hex
-        chunks = load_and_split(path, doc_id, filename)
-        kb.add_document(doc_id, filename, len(text.encode("utf-8")), chunks)
+        chunks, pages = load_and_split_with_pages(path, doc_id, filename)
+        kb.add_document(doc_id, filename, len(text.encode("utf-8")), chunks, pages=pages)
         logger.info("健身语料已装载：%s（%d 片）", filename, len(chunks))

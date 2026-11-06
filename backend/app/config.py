@@ -117,3 +117,6 @@ FEEDBACK_MAX_MB = float(os.getenv("FEEDBACK_MAX_MB", "5"))
 CONTEXTUALIZE_ENABLED = os.getenv("CONTEXTUALIZE_ENABLED", "true").lower() == "true"
 # 送进改写 prompt 的历史轮数上限（一问一答算一轮）
 CONTEXTUALIZE_MAX_TURNS = int(os.getenv("CONTEXTUALIZE_MAX_TURNS", "3"))
+
+# 文档原文接口的返回上限（字符）。超出时只返回前若干页并置 truncated=true。
+DOC_CONTENT_MAX_CHARS = int(os.getenv("DOC_CONTENT_MAX_CHARS", "500000"))

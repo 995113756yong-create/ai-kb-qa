@@ -23,7 +23,12 @@ from app.agent.prompts import VALID_MODES
 from app.agent.runner import run_agent
 from app.agent.sse import SSE_HEADERS, stream_events
 from app.agent_store import AgentStore, DEFAULT_AGENT_ID, effective_mode
-from app.document import KnowledgeBase, get_embeddings, load_and_split
+from app.document import (
+    KnowledgeBase,
+    get_embeddings,
+    load_and_split,
+    load_and_split_with_pages,
+)
 from app.qa import NOT_FOUND_ANSWER, QAService, get_llm
 from app.seed_agents import ensure_seed_agents
 from app.security import RateLimiter, client_key, require_admin
@@ -259,6 +264,103 @@ def create_app(
             logger.warning("feedback 落盘失败", exc_info=True)
         return {"status": "ok"}
 
+    @app.get("/api/docs/{doc_id}/content")
+    def get_doc_content(doc_id: str, request: Request, agent_id: str = DEFAULT_AGENT_ID):
+        """返回文档原文与每个片段的偏移，供证据阅读器精确定位。
+
+        precise=true 表示原文文件存在且所有片段都有偏移；
+        旧文档走降级：每个片段单独成页，page_index 指向它在 pages 里的位置。
+        """
+        if not DOC_ID_RE.match(doc_id):
+            raise HTTPException(status_code=400, detail="文档 ID 格式不正确")
+        limiter.check("content:" + client_key(request))
+
+        store = getattr(request.app.state, "store", None)
+        if store is None:
+            raise HTTPException(status_code=503, detail=MISSING_KEY_MSG)
+        try:
+            kb = store.kb(agent_id) if agent_id and agent_id != DEFAULT_AGENT_ID else getattr(
+                request.app.state, "kb", None)
+        except Exception:
+            kb = getattr(request.app.state, "kb", None)
+        if kb is None:
+            raise HTTPException(status_code=503, detail="知识库未就绪")
+
+        entry = next((d for d in kb.list_documents() if d.get("doc_id") == doc_id), None)
+        if entry is None:
+            raise HTTPException(status_code=404, detail="文档不存在")
+
+        chunks = kb.list_chunks_of(doc_id)
+        if not chunks:
+            raise HTTPException(status_code=404, detail="文档没有可用的片段")
+
+        text_data = kb.get_document_text(doc_id)
+        precise = bool(
+            text_data
+            and text_data.get("pages")
+            and all(
+                isinstance((c.metadata or {}).get("start"), int)
+                and isinstance((c.metadata or {}).get("end"), int)
+                for c in chunks
+            )
+        )
+
+        chunk_items = []
+        if precise:
+            pages = [{"page": p.get("page"), "text": p.get("text") or ""} for p in text_data["pages"]]
+            # page_index：片段页码在 pages 里的位置。文本文件只有一页，PDF 按页码映射。
+            page_pos = {p["page"]: i for i, p in enumerate(pages)}
+            for c in chunks:
+                meta = c.metadata or {}
+                chunk_items.append({
+                    "chunk_id": meta.get("chunk_id"),
+                    "chunk_index": meta.get("chunk_index"),
+                    "page": meta.get("page"),
+                    "page_index": page_pos.get(meta.get("page"), 0),
+                    "start": meta.get("start"),
+                    "end": meta.get("end"),
+                })
+        else:
+            # 降级：每个片段单独成页
+            pages = []
+            for i, c in enumerate(chunks):
+                meta = c.metadata or {}
+                pages.append({"page": meta.get("page"), "text": c.page_content})
+                chunk_items.append({
+                    "chunk_id": meta.get("chunk_id"),
+                    "chunk_index": meta.get("chunk_index"),
+                    "page": meta.get("page"),
+                    "page_index": i,
+                    "start": 0,
+                    "end": len(c.page_content),
+                })
+
+        # 总量截断：超限时保留前若干页，并标记 truncated
+        limit = config.DOC_CONTENT_MAX_CHARS
+        truncated = False
+        if limit > 0:
+            kept, total_len = [], 0
+            for p in pages:
+                if total_len + len(p["text"]) > limit:
+                    truncated = True
+                    break
+                kept.append(p)
+                total_len += len(p["text"])
+            if truncated:
+                keep_n = len(kept)
+                pages = kept
+                chunk_items = [c for c in chunk_items if c["page_index"] < keep_n]
+
+        return {
+            "status": "ok",
+            "doc_id": doc_id,
+            "filename": entry.get("filename"),
+            "precise": precise,
+            "truncated": truncated,
+            "pages": pages,
+            "chunks": chunk_items,
+        }
+
     @app.get("/api/chunks/{chunk_id}")
     def get_chunk(chunk_id: str, request: Request, agent_id: str = DEFAULT_AGENT_ID,
                   neighbors: int = 0):
@@ -382,8 +484,12 @@ def create_app(
             if size == 0:
                 raise HTTPException(status_code=400, detail="文件为空")
 
-            chunks = await run_in_threadpool(load_and_split, file_path, doc_id, display_name)
-            await run_in_threadpool(kb.add_document, doc_id, display_name, size, chunks)
+            chunks, pages = await run_in_threadpool(
+                load_and_split_with_pages, file_path, doc_id, display_name
+            )
+            await run_in_threadpool(
+                kb.add_document, doc_id, display_name, size, chunks, pages
+            )
         except HTTPException:
             _remove_quietly(file_path)
             raise

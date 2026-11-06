@@ -57,30 +57,64 @@ def get_embeddings() -> Embeddings:
     )
 
 
-def load_and_split(file_path: str, doc_id: str, source: str) -> List[Document]:
-    """加载文件并切分，每个片段的 metadata 记录 doc_id / source / page / chunk_index / chunk_id。"""
+def load_and_split_with_pages(
+    file_path: str, doc_id: str, source: str
+) -> Tuple[List[Document], List[dict]]:
+    """加载文件并切分，同时返回页文本，供阅读器按偏移定位原文。
+
+    返回 (chunks, pages)：
+    - chunks 的 metadata 记录 doc_id / source / page / chunk_index / chunk_id，
+      以及片段在所属页文本中的 [start, end) 偏移（start_index 不可用时为 None）
+    - pages 是 [{"page": int|None, "text": str}, ...]，顺序与原文一致
+
+    切片偏移依赖 RecursiveCharacterTextSplitter(add_start_index=True)：
+    在 langchain-text-splitters 0.3.0 下，start_index 是片段在**所属页文本**
+    中的字符偏移，page_text[start:start+len(content)] == content 成立（含 overlap）。
+    """
     if file_path.lower().endswith(".pdf"):
         loader = PyPDFLoader(file_path)
     else:
         loader = TextLoader(file_path, encoding="utf-8")
-    pages = loader.load()
+    loaded_pages = loader.load()
 
     splitter = RecursiveCharacterTextSplitter(
         chunk_size=CHUNK_SIZE,
         chunk_overlap=CHUNK_OVERLAP,
+        add_start_index=True,
     )
-    chunks = splitter.split_documents(pages)
+    chunks = splitter.split_documents(loaded_pages)
+
+    page_texts: List[dict] = []
+    for doc in loaded_pages:
+        page_no = doc.metadata.get("page")
+        page_texts.append(
+            {
+                # PyPDFLoader 的页码从 0 开始，转成人类习惯的 1 开始；文本文件没有页码
+                "page": page_no + 1 if isinstance(page_no, int) else None,
+                "text": doc.page_content,
+            }
+        )
 
     for i, chunk in enumerate(chunks):
         page = chunk.metadata.get("page")
+        start = chunk.metadata.get("start_index")
+        valid_start = isinstance(start, int) and start >= 0
         chunk.metadata = {
             "doc_id": doc_id,
             "source": source,
-            # PyPDFLoader 的页码从 0 开始，这里转成人类习惯的 1 开始；文本文件没有页码
             "page": page + 1 if isinstance(page, int) else None,
             "chunk_index": i,
             "chunk_id": chunk_id_of(doc_id, i),
+            # 片段在所属页文本中的 [start, end) 偏移，阅读器高亮用；旧数据没有这两个字段
+            "start": start if valid_start else None,
+            "end": start + len(chunk.page_content) if valid_start else None,
         }
+    return chunks, page_texts
+
+
+def load_and_split(file_path: str, doc_id: str, source: str) -> List[Document]:
+    """加载文件并切分，只返回片段（保留旧签名，调用方无需改动）。"""
+    chunks, _ = load_and_split_with_pages(file_path, doc_id, source)
     return chunks
 
 
@@ -220,7 +254,14 @@ class KnowledgeBase:
     def is_empty(self) -> bool:
         return self._store is None
 
-    def add_document(self, doc_id: str, source: str, size: int, chunks: List[Document]) -> None:
+    def add_document(
+        self,
+        doc_id: str,
+        source: str,
+        size: int,
+        chunks: List[Document],
+        pages: Optional[List[dict]] = None,
+    ) -> None:
         """先算向量再进锁写入。
 
         算向量要调外部 Embedding 接口，通常几百毫秒到几秒。如果放在锁里，
@@ -265,6 +306,9 @@ class KnowledgeBase:
             self._rebuild_bm25()
             try:
                 self._save()
+                # 原文落盘：阅读器按偏移定位用。写失败只告警不回滚，
+                # 因为阅读器有降级路径，原文文件不能成为新的故障点。
+                self._write_doc_text(doc_id, pages or [])
             except Exception:
                 # 落盘失败必须回滚，否则内存里有这份文档、磁盘没有，
                 # 接口却返回 500 且上传文件已被删除，重启后文档凭空消失。
@@ -437,6 +481,53 @@ class KnowledgeBase:
                 )
             return self._store.similarity_search_with_score(query, k=k)
 
+    # ---------- 原文文本（阅读器用） ----------
+    def _texts_dir(self) -> str:
+        return os.path.join(self.index_dir, "texts")
+
+    def _text_path(self, doc_id: str) -> str:
+        return os.path.join(self._texts_dir(), f"{doc_id}.json")
+
+    def _write_doc_text(self, doc_id: str, pages: List[dict]) -> None:
+        """原子写入 {index_dir}/texts/{doc_id}.json。失败只打 warning。"""
+        path = self._text_path(doc_id)
+        try:
+            os.makedirs(self._texts_dir(), exist_ok=True)
+            tmp = path + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump({"version": 1, "pages": pages}, f, ensure_ascii=False)
+            os.replace(tmp, path)
+        except OSError as e:
+            logger.warning("保存文档原文失败（doc_id=%s）：%s", doc_id, e)
+
+    def get_document_text(self, doc_id: str) -> Optional[dict]:
+        """返回 {"pages": [...]}；旧文档没有原文文件时返回 None。"""
+        path = self._text_path(doc_id)
+        if not os.path.exists(path):
+            return None
+        try:
+            with open(path, encoding="utf-8") as f:
+                data = json.load(f)
+        except (OSError, json.JSONDecodeError):
+            return None
+        if not isinstance(data, dict) or not isinstance(data.get("pages"), list):
+            return None
+        return data
+
+    def list_chunks_of(self, doc_id: str) -> List[Document]:
+        """按 chunk_index 升序返回该文档的全部片段。"""
+        with self._lock:
+            if self._store is None:
+                return []
+            out: List[Document] = []
+            for stored in self._store.docstore._dict.values():
+                if not isinstance(stored, Document):
+                    continue
+                if (stored.metadata or {}).get("doc_id") == doc_id:
+                    out.append(stored)
+            out.sort(key=lambda d: (d.metadata or {}).get("chunk_index") or 0)
+            return out
+
     def get_chunk(self, chunk_id: str) -> Optional[Document]:
         with self._lock:
             if self._store is None:
@@ -491,6 +582,10 @@ class KnowledgeBase:
                 )
             self._docs = [d for d in self._docs if d["doc_id"] != doc_id]
             self._pos_by_doc_id = None
+            try:
+                os.remove(self._text_path(doc_id))
+            except OSError:
+                pass
 
             if getattr(self._store.index, "ntotal", 0):
                 # 删除后必须重建 BM25，否则已删片段还能被关键词路召回，

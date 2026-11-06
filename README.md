@@ -222,6 +222,7 @@ npm run dev                     # 访问 http://localhost:3000
 | `FEEDBACK_MAX_MB` | `5` | 反馈文件上限（MB），超过后轮转为 `feedback.jsonl.1` |
 | `CONTEXTUALIZE_ENABLED` | `true` | 多轮追问改写开关；有历史且问题像追问时才改写 |
 | `CONTEXTUALIZE_MAX_TURNS` | `3` | 送进改写 prompt 的历史轮数上限 |
+| `DOC_CONTENT_MAX_CHARS` | `500000` | `GET /api/docs/{id}/content` 返回原文的字符上限 |
 
 ### 前端 `frontend/.env`
 
@@ -238,6 +239,7 @@ npm run dev                     # 访问 http://localhost:3000
 | GET | `/api/docs` | 已索引文档列表 |
 | POST | `/api/upload` | 上传文档并追加到索引（multipart/form-data） |
 | DELETE | `/api/docs/{doc_id}` | 删除文档（`doc_id` 必须是 32 位小写十六进制） |
+| GET | `/api/docs/{doc_id}/content` | 文档原文与片段偏移，供证据阅读器精确定位；旧文档走降级（`precise=false`） |
 | POST | `/api/ask` | 固定 RAG 问答 |
 | POST | `/api/agent/stream` | Agent 问答，SSE 流式返回 |
 | GET | `/api/agents` | 专家列表（default 永远第一） |
@@ -261,7 +263,11 @@ npm run dev                     # 访问 http://localhost:3000
 
 ### SSE 事件
 
-`POST /api/agent/stream`，请求体 `{"question": "..."}`（1～1000 字），响应 `text/event-stream`。
+`POST /api/agent/stream`，请求体 `{"question": "...", "history": [...]}`（question 1～1000 字；history 可选，最近几轮对话，最多 12 条、每条 2000 字），响应 `text/event-stream`。
+
+**history 只用于把追问改写成独立问题**：研究和回答阶段的 prompt 一行不改，证据边界与单轮完全一致。改写成功时会先发一个 `rewrite` 事件（`{original, rewritten}`），`final` 事件带 `rewritten_question`。
+
+**快速模式（`/api/ask`）不支持多轮**，保持单轮。
 每个事件格式为 `event: <type>\ndata: <json>\n\n`，`data` 里同样带 `type` 字段，前端可直接复用类型定义。
 
 | 事件 | data 字段 |
