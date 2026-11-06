@@ -62,7 +62,7 @@ export default function ChatApp({ initialAgentId, initialConversationId }: Props
         setAgents(res.agents);
       } catch {
         if (cancelled) return;
-        toast.error("加载专家列表失败");
+        toast.error(t("errors.agentsLoadFailed"));
       } finally {
         if (!cancelled) setAgentsLoading(false);
       }
@@ -70,7 +70,7 @@ export default function ChatApp({ initialAgentId, initialConversationId }: Props
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [t]);
 
   // ---------- 会话管理 ----------
   const {
@@ -112,29 +112,29 @@ export default function ChatApp({ initialAgentId, initialConversationId }: Props
       const res = await listAgents();
       setAgents(res.agents);
     } catch {
-      toast.error("加载专家列表失败");
+      toast.error(t("errors.agentsLoadFailed"));
     }
-  }, []);
+  }, [t]);
 
   const handleCreateAgent = useCallback(
     async (payload: AgentCreateRequest) => {
       try {
         await createAgent(payload);
-        toast.success(`专家「${payload.name}」创建成功`);
+        toast.success(t("experts.created"));
         await refreshAgents();
         await refreshDocs();
       } catch (e) {
-        toast.error(e instanceof Error ? e.message : "创建专家失败");
+        toast.error(e instanceof Error ? e.message : t("experts.createFailed"));
       }
     },
-    [refreshAgents, refreshDocs],
+    [refreshAgents, refreshDocs, t],
   );
 
   const handleDeleteAgent = useCallback(
     async (agentId: string) => {
       try {
         await deleteAgent(agentId);
-        toast.success("专家已删除");
+        toast.success(t("experts.deleted"));
         if (agentId === activeAgentId) {
           setActiveAgentId("default");
           syncAddress("default", null);
@@ -142,10 +142,10 @@ export default function ChatApp({ initialAgentId, initialConversationId }: Props
         await refreshAgents();
         await refreshDocs();
       } catch (e) {
-        toast.error(e instanceof Error ? e.message : "删除专家失败");
+        toast.error(e instanceof Error ? e.message : t("experts.deleteFailed"));
       }
     },
-    [activeAgentId, refreshAgents, refreshDocs, syncAddress],
+    [activeAgentId, refreshAgents, refreshDocs, syncAddress, t],
   );
 
   useEffect(() => {
@@ -220,7 +220,7 @@ export default function ChatApp({ initialAgentId, initialConversationId }: Props
                 role: "assistant",
                 mode: "fast",
                 steps: [],
-                answer: `获取回答失败：${detail}`,
+                answer: t("errors.answerFailed", { detail }),
                 sources: null,
                 segments: null,
                 groundedRatio: null,
@@ -268,6 +268,7 @@ export default function ChatApp({ initialAgentId, initialConversationId }: Props
       run,
       running,
       updateLast,
+      t,
     ],
   );
 
@@ -433,13 +434,13 @@ export default function ChatApp({ initialAgentId, initialConversationId }: Props
             />
             {mode === "fast" && messages.length > 0 ? (
               <div className="flex items-center justify-center gap-1.5 border-t border-border/60 bg-muted/30 px-4 py-1.5 text-[11px] text-muted-foreground">
-                快速模式不理解上下文，追问请切换到 Agent 模式
+                {t("chat.fastNoContext")}
                 <button
                   type="button"
                   onClick={() => setMode("agent")}
                   className="font-medium text-primary underline underline-offset-2"
                 >
-                  切换
+                  {t("chat.switch")}
                 </button>
               </div>
             ) : null}

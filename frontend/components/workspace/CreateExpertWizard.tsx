@@ -14,6 +14,7 @@ import { Label } from "@/components/ui/label";
 import { UploadZone } from "@/components/workspace/UploadZone";
 import { PERSONA_TEMPLATES } from "@/lib/personaTemplates";
 import type { AgentInfo } from "@/lib/types";
+import { useI18n } from "@/lib/i18n";
 
 const EMOJI_CHOICES = ["🤖", "💪", "🎧", "⚖️", "📚", "🧭", "🎨", "🩺", "🍳", "✈️", "💰", "🔬"];
 
@@ -34,6 +35,7 @@ export type CreateExpertWizardProps = {
 };
 
 export default function CreateExpertWizard({ open, onOpenChange, onCreate }: CreateExpertWizardProps) {
+  const { t } = useI18n();
   const [step, setStep] = useState(0);
   const [name, setName] = useState("");
   const [emoji, setEmoji] = useState("🤖");
@@ -77,12 +79,12 @@ export default function CreateExpertWizard({ open, onOpenChange, onCreate }: Cre
     <Dialog open={open} onOpenChange={(o) => { if (!o) reset(); onOpenChange(o); }}>
       <DialogContent className="max-w-xl">
         <DialogHeader>
-          <DialogTitle>新建专家</DialogTitle>
+          <DialogTitle>{t("nav.newExpert")}</DialogTitle>
         </DialogHeader>
 
         {/* 步骤指示器 */}
-        <div className="flex items-center gap-2" aria-label={`第 ${step + 1} 步，共 3 步`}>
-          {["基本信息", "人设与模式", "资料"].map((label, i) => (
+        <div className="flex items-center gap-2" aria-label={t("experts.stepOf", { n: step + 1, total: 3 })}>
+          {[t("experts.stepBasic"), t("experts.stepPersona"), t("experts.stepMaterials")].map((label, i) => (
             <div key={label} className="flex items-center gap-1.5 text-xs">
               <span
                 className={`flex size-5 items-center justify-center rounded-full ${
@@ -100,14 +102,14 @@ export default function CreateExpertWizard({ open, onOpenChange, onCreate }: Cre
         {step === 0 ? (
           <div className="flex flex-col gap-3">
             <div>
-              <Label htmlFor="expert-name">名称 *</Label>
+              <Label htmlFor="expert-name">{t("experts.nameRequired")}</Label>
               <Input
                 id="expert-name"
                 data-testid="expert-name"
                 value={name}
                 maxLength={40}
                 onChange={(e) => setName(e.target.value)}
-                placeholder="例如：产品客服助手"
+                placeholder={t("experts.namePlaceholder")}
               />
             </div>
             <div>
@@ -129,28 +131,28 @@ export default function CreateExpertWizard({ open, onOpenChange, onCreate }: Cre
                   value={emoji}
                   onChange={(e) => setEmoji(e.target.value.slice(0, 4))}
                   className="w-16 text-center"
-                  aria-label="自定义 emoji"
+                  aria-label={t("experts.customEmoji")}
                 />
               </div>
             </div>
             <div>
-              <Label htmlFor="expert-description">简介</Label>
+              <Label htmlFor="expert-description">{t("experts.description")}</Label>
               <Input
                 id="expert-description"
                 value={description}
                 maxLength={200}
                 onChange={(e) => setDescription(e.target.value)}
-                placeholder="一句话说明这个专家擅长什么"
+                placeholder={t("experts.descriptionPlaceholder")}
               />
             </div>
             <div>
-              <Label htmlFor="expert-greeting">欢迎语</Label>
+              <Label htmlFor="expert-greeting">{t("experts.greeting")}</Label>
               <Input
                 id="expert-greeting"
                 value={greeting}
                 maxLength={200}
                 onChange={(e) => setGreeting(e.target.value)}
-                placeholder="新会话打开时显示的第一句话"
+                placeholder={t("experts.greetingPlaceholder")}
               />
             </div>
           </div>
@@ -159,7 +161,7 @@ export default function CreateExpertWizard({ open, onOpenChange, onCreate }: Cre
         {step === 1 ? (
           <div className="flex flex-col gap-3">
             <div>
-              <Label>人设模板</Label>
+              <Label>{t("experts.personaTemplates")}</Label>
               <div className="mt-1 grid grid-cols-2 gap-2">
                 {PERSONA_TEMPLATES.map((t) => (
                   <button
@@ -178,7 +180,7 @@ export default function CreateExpertWizard({ open, onOpenChange, onCreate }: Cre
               </div>
             </div>
             <div>
-              <Label htmlFor="expert-persona">人设（可编辑）</Label>
+              <Label htmlFor="expert-persona">{t("experts.personaEditable")}</Label>
               <Textarea
                 id="expert-persona"
                 data-testid="expert-persona"
@@ -189,27 +191,27 @@ export default function CreateExpertWizard({ open, onOpenChange, onCreate }: Cre
               />
             </div>
             <fieldset data-testid="answer-mode-fieldset" className="flex flex-col gap-2">
-              <legend className="text-sm font-medium">回答模式</legend>
+              <legend className="text-sm font-medium">{t("experts.answerModeLabel", { mode: "" })}</legend>
               <RadioGroup value={answerMode} onValueChange={(v) => setAnswerMode(v as "strict" | "reference")}>
                 <div className="flex items-center gap-2">
                   <RadioGroupItem value="strict" id="mode-strict" data-testid="mode-strict" />
-                  <Label htmlFor="mode-strict">严格模式：无证据时拒答</Label>
+                  <Label htmlFor="mode-strict">{t("experts.strictModeDesc")}</Label>
                 </div>
                 <div className="flex items-center gap-2">
                   <RadioGroupItem value="reference" id="mode-reference" data-testid="mode-reference" />
-                  <Label htmlFor="mode-reference">参考模式：知识不足时说明并给参考</Label>
+                  <Label htmlFor="mode-reference">{t("experts.referenceModeDesc")}</Label>
                 </div>
               </RadioGroup>
             </fieldset>
             <div>
-              <Label>推荐问题（最多 4 条）</Label>
+              <Label>{t("experts.startersMax")}</Label>
               {starters.map((s, i) => (
                 <Input
                   key={i}
                   value={s}
                   maxLength={60}
                   className="mt-1.5"
-                  placeholder={`推荐问题 ${i + 1}`}
+                  placeholder={t("experts.starterPlaceholder", { n: i + 1 })}
                   onChange={(e) => {
                     const next = [...starters];
                     next[i] = e.target.value;
@@ -223,7 +225,7 @@ export default function CreateExpertWizard({ open, onOpenChange, onCreate }: Cre
 
         {step === 2 ? (
           <div className="flex flex-col gap-3">
-            <p className="text-sm text-muted-foreground">上传这个专家的资料文档（可跳过，之后也可在左侧知识库面板上传）。</p>
+            <p className="text-sm text-muted-foreground">{t("experts.materialsHint")}</p>
             <UploadZone mode="local" multiple files={files} onFilesChange={setFiles} />
           </div>
         ) : null}
@@ -231,16 +233,16 @@ export default function CreateExpertWizard({ open, onOpenChange, onCreate }: Cre
         <DialogFooter className="gap-2">
           {step > 0 ? (
             <Button variant="outline" onClick={() => setStep((s) => s - 1)}>
-              上一步
+              {t("experts.prev")}
             </Button>
           ) : null}
           {step < 2 ? (
             <Button disabled={!canNext} data-testid="wizard-next" onClick={() => setStep((s) => s + 1)}>
-              下一步
+              {t("experts.next")}
             </Button>
           ) : (
             <Button data-testid="wizard-create" onClick={submit}>
-              创建专家
+              {t("experts.createExpertButton")}
             </Button>
           )}
         </DialogFooter>

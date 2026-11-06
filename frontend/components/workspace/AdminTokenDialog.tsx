@@ -15,6 +15,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { lsGet, lsSet } from "@/lib/storage";
+import { useI18n } from "@/lib/i18n";
 
 export type AdminTokenDialogProps = {
   open: boolean;
@@ -26,6 +27,7 @@ export type AdminTokenDialogProps = {
 export const ADMIN_TOKEN_KEY = "kb-admin-token";
 
 export function AdminTokenDialog({ open, onSave, onCancel }: AdminTokenDialogProps) {
+  const { t } = useI18n();
   const [value, setValue] = useState("");
 
   // 打开时从本地读一次初值。用「上一次的 open」判断是否刚打开，
@@ -40,9 +42,9 @@ export function AdminTokenDialog({ open, onSave, onCancel }: AdminTokenDialogPro
     <AlertDialog open={open}>
       <AlertDialogContent>
         <AlertDialogHeader>
-          <AlertDialogTitle>需要管理员令牌</AlertDialogTitle>
+          <AlertDialogTitle>{t("experts.adminToken")}</AlertDialogTitle>
           <AlertDialogDescription>
-            创建专家、删除文档等管理操作需要管理员令牌。令牌只保存在本机浏览器，不会出现在链接里。
+            {t("experts.adminTokenHint")}
           </AlertDialogDescription>
         </AlertDialogHeader>
         <input
@@ -50,11 +52,11 @@ export function AdminTokenDialog({ open, onSave, onCancel }: AdminTokenDialogPro
           type="password"
           value={value}
           onChange={(e) => setValue(e.target.value)}
-          placeholder="粘贴管理员令牌"
+          placeholder={t("experts.adminTokenPlaceholder")}
           className="mt-2 w-full rounded-md border border-input bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
         />
         <AlertDialogFooter>
-          <AlertDialogCancel onClick={() => onCancel?.()}>取消</AlertDialogCancel>
+          <AlertDialogCancel onClick={() => onCancel?.()}>{t("common.cancel")}</AlertDialogCancel>
           <button
             type="button"
             data-testid="admin-token-save"
@@ -65,7 +67,7 @@ export function AdminTokenDialog({ open, onSave, onCancel }: AdminTokenDialogPro
             }}
             className="inline-flex h-9 items-center justify-center rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
           >
-            保存
+            {t("common.save")}
           </button>
         </AlertDialogFooter>
       </AlertDialogContent>

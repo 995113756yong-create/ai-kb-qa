@@ -42,6 +42,7 @@ export const en = {
     deleteExpert: "Delete expert",
     docsOfAgent: "Documents of {name}",
     selectDocToUpload: "Choose a document to upload",
+    newExpert: "New expert",
   },
 
   chat: {
@@ -79,6 +80,7 @@ export const en = {
     fastNoContext: "Fast mode has no conversation context. Switch to Agent mode to follow up.",
     ungrounded: "This answer cites no documents; treat it with caution",
     thinkingLabel: "Thinking",
+    switch: "Switch",
   },
 
   trace: {
@@ -125,6 +127,7 @@ export const en = {
     viewOriginal: "View original →",
     collapseArrow: "Collapse ▲",
     expandArrow: "Expand ▼",
+    closeDrawer: "Close source drawer",
   },
 
   experts: {
@@ -186,6 +189,10 @@ export const en = {
     createExpertButton: "Create expert",
     deleteConfirmTitle: "Delete expert “{name}”?",
     deleteConfirmBody: "Its documents, index, and conversations will be removed permanently.",
+    nameRequired: "Name *",
+    prev: "Back",
+    next: "Next",
+    deleted: "Expert deleted",
   },
 
   eval: {
@@ -220,6 +227,7 @@ export const en = {
     groundedLabel: "Grounded",
     ungroundedLabel: "Ungrounded",
     problems: "Problems: {list}",
+    backToChat: "Back to chat",
   },
 
   palette: {
@@ -273,5 +281,7 @@ export const en = {
     uploadSize: "File must not exceed {mb}MB",
     nameRequired: "Name is required",
     answerFailed: "Could not get an answer: {detail}",
+    deleteFailed: "Delete failed, please try again",
+    createFailed: "Create failed, please try again",
   },
 } as const;

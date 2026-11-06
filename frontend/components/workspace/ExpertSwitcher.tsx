@@ -26,6 +26,7 @@ import ExpertGallery from "@/components/workspace/ExpertGallery";
 import CreateExpertWizard from "@/components/workspace/CreateExpertWizard";
 import type { AgentInfo } from "@/lib/types";
 import type { AgentCreateRequest } from "@/lib/types";
+import { useI18n } from "@/lib/i18n";
 
 export type ExpertSwitcherProps = {
   agents: AgentInfo[];
@@ -53,11 +54,12 @@ export default function ExpertSwitcher({
   onWizardOpenChange,
   onCreateAgent,
 }: ExpertSwitcherProps) {
+  const { t } = useI18n();
   const [menuOpen, setMenuOpen] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState<AgentInfo | null>(null);
 
   const emoji = activeAgent?.emoji ?? "🤖";
-  const name = activeAgent?.name ?? "加载中…";
+  const name = activeAgent?.name ?? t("common.loading");
   const docCount = activeAgent?.doc_count;
 
   return (
@@ -75,7 +77,7 @@ export default function ExpertSwitcher({
             <span className="min-w-0 flex-1">
               <span className="block truncate text-sm font-medium">{name}</span>
               <span className="block text-[11px] text-muted-foreground">
-                {docCount !== undefined ? `${docCount} 份文档` : "专家"}
+                {docCount !== undefined ? t("nav.docsCount", { n: docCount }) : t("experts.title")}
               </span>
             </span>
             <span className="text-muted-foreground">⌄</span>
@@ -99,7 +101,7 @@ export default function ExpertSwitcher({
               {agent.agent_id !== "default" ? (
                 <button
                   type="button"
-                  aria-label={`删除专家 ${agent.name}`}
+                  aria-label={`${t("nav.deleteExpert")} ${agent.name}`}
                   className="opacity-0 transition-opacity group-hover:opacity-100 hover:text-destructive"
                   onClick={(e) => {
                     e.stopPropagation();
@@ -113,10 +115,10 @@ export default function ExpertSwitcher({
           ))}
           <DropdownMenuSeparator />
           <DropdownMenuItem onSelect={() => onGalleryOpenChange(true)}>
-            🏛 专家广场…
+            🏛 {t("experts.galleryTitle")}…
           </DropdownMenuItem>
           <DropdownMenuItem onSelect={() => onWizardOpenChange(true)}>
-            ＋ 新建专家…
+            ＋ {t("nav.newExpert")}…
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
@@ -124,20 +126,20 @@ export default function ExpertSwitcher({
       <AlertDialog open={confirmDelete !== null} onOpenChange={(open) => !open && setConfirmDelete(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>删除专家「{confirmDelete?.name}」？</AlertDialogTitle>
+            <AlertDialogTitle>{t("experts.deleteConfirmTitle", { name: confirmDelete?.name ?? "" })}</AlertDialogTitle>
             <AlertDialogDescription>
-              删除后该专家的文档、索引和会话记录都会清除，无法恢复。
+              {t("experts.deleteConfirmBody")}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>取消</AlertDialogCancel>
+            <AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>
             <AlertDialogAction
               onClick={() => {
                 if (confirmDelete) onDelete(confirmDelete.agent_id);
                 setConfirmDelete(null);
               }}
             >
-              删除
+              {t("common.delete")}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

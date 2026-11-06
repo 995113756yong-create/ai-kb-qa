@@ -41,6 +41,7 @@ export const zh = {
     deleteExpert: "删除专家",
     docsOfAgent: "{name}的文档",
     selectDocToUpload: "选择要上传的文档",
+    newExpert: "新建专家",
   },
 
   chat: {
@@ -78,6 +79,7 @@ export const zh = {
     fastNoContext: "快速模式不理解上下文，追问请切换到 Agent 模式",
     ungrounded: "该回答未引用文档内容，请谨慎参考",
     thinkingLabel: "思考中",
+    switch: "切换",
   },
 
   trace: {
@@ -124,6 +126,7 @@ export const zh = {
     viewOriginal: "点击查看原文 →",
     collapseArrow: "收起 ▲",
     expandArrow: "展开 ▼",
+    closeDrawer: "关闭证据抽屉",
   },
 
   experts: {
@@ -185,6 +188,10 @@ export const zh = {
     createExpertButton: "创建专家",
     deleteConfirmTitle: "删除专家「{name}」？",
     deleteConfirmBody: "删除后该专家的文档、索引和会话记录都会清除，无法恢复。",
+    nameRequired: "名称 *",
+    prev: "上一步",
+    next: "下一步",
+    deleted: "专家已删除",
   },
 
   eval: {
@@ -219,6 +226,7 @@ export const zh = {
     groundedLabel: "已溯源",
     ungroundedLabel: "未溯源",
     problems: "问题：{list}",
+    backToChat: "返回对话",
   },
 
   palette: {
@@ -272,5 +280,7 @@ export const zh = {
     uploadSize: "文件不能超过 {mb}MB",
     nameRequired: "名称不能为空",
     answerFailed: "获取回答失败：{detail}",
+    deleteFailed: "删除失败，请重试",
+    createFailed: "创建失败，请重试",
   },
 } as const;

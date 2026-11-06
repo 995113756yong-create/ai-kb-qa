@@ -42,8 +42,8 @@ export default function SourceCards({ sources }: Props) {
                 <span className="inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-indigo-100 px-1 text-[10px] font-semibold text-indigo-700 dark:bg-indigo-500/20 dark:text-indigo-300">
                   {source.index}
                 </span>
-                [{source.index}] {source.source ?? "未知文档"}
-                {source.page ? ` · 第${source.page}页` : ""}
+                [{source.index}] {source.source ?? t("common.unknownDoc")}
+                {source.page ? ` · ${t("common.page", { n: source.page })}` : ""}
               </p>
               <p className="mt-1 whitespace-pre-wrap text-zinc-500 dark:text-zinc-400">
                 {source.snippet}

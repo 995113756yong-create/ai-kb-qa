@@ -4,6 +4,7 @@ import { useCallback, useRef, useState } from "react";
 
 import { ApiError, createAgent, deleteAgent, deleteDoc, uploadDoc } from "@/lib/api";
 import type { AgentInfo, DocInfo } from "@/lib/types";
+import { useI18n } from "@/lib/i18n";
 
 const ACCEPT = [".txt", ".md", ".pdf"];
 const MAX_MB = 10;
@@ -52,6 +53,7 @@ export default function DocSidebar({
   onRefreshAgents,
   onSelectAgent,
 }: Props) {
+  const { t } = useI18n();
   const inputRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -83,11 +85,11 @@ export default function DocSidebar({
       const dot = file.name.lastIndexOf(".");
       const ext = dot >= 0 ? file.name.slice(dot).toLowerCase() : "";
       if (!ACCEPT.includes(ext)) {
-        setError(`只支持 ${ACCEPT.join(" / ")} 格式`);
+        setError(t("errors.uploadFormat", { formats: ACCEPT.join(" / ") }));
         return;
       }
       if (file.size > MAX_MB * 1024 * 1024) {
-        setError(`文件不能超过 ${MAX_MB}MB`);
+        setError(t("errors.uploadSize", { mb: MAX_MB }));
         return;
       }
 
@@ -96,7 +98,7 @@ export default function DocSidebar({
         await uploadDoc(file, activeAgentId);
         await onRefreshDocs();
       } catch (e) {
-        setError(e instanceof ApiError ? e.message : "上传失败，请重试");
+        setError(e instanceof ApiError ? e.message : t("errors.uploadFailed"));
       } finally {
         setUploading(false);
         if (inputRef.current) {
@@ -105,12 +107,12 @@ export default function DocSidebar({
         }
       }
     },
-    [activeAgentId, onRefreshDocs],
+    [activeAgentId, onRefreshDocs, t],
   );
 
   const handleDeleteDoc = useCallback(
     async (doc: DocInfo) => {
-      if (!window.confirm(`确定删除《${doc.filename}》？删除后无法恢复。`)) {
+      if (!window.confirm(t("nav.deleteDocConfirm", { name: doc.filename }))) {
         return;
       }
       setError(null);
@@ -118,15 +120,15 @@ export default function DocSidebar({
         await deleteDoc(doc.doc_id, activeAgentId);
         await onRefreshDocs();
       } catch (e) {
-        setError(e instanceof ApiError ? e.message : "删除失败，请重试");
+        setError(e instanceof ApiError ? e.message : t("errors.deleteFailed"));
       }
     },
-    [activeAgentId, onRefreshDocs],
+    [activeAgentId, onRefreshDocs, t],
   );
 
   const handleDeleteAgent = useCallback(
     async (agent: AgentInfo) => {
-      if (!window.confirm(`确定删除专家「${agent.name}」？其文档和对话数据将一并删除，无法恢复。`)) {
+      if (!window.confirm(t("experts.deleteConfirmBody"))) {
         return;
       }
       setError(null);
@@ -138,10 +140,10 @@ export default function DocSidebar({
           onSelectAgent("default");
         }
       } catch (e) {
-        setError(e instanceof ApiError ? e.message : "删除失败，请重试");
+        setError(e instanceof ApiError ? e.message : t("errors.deleteFailed"));
       }
     },
-    [activeAgentId, onRefreshAgents, onSelectAgent],
+    [activeAgentId, onRefreshAgents, onSelectAgent, t],
   );
 
   const handleCreateAgent = useCallback(
@@ -149,7 +151,7 @@ export default function DocSidebar({
       event.preventDefault();
       const trimmed = name.trim();
       if (!trimmed) {
-        setError("专家名称不能为空");
+        setError(t("errors.nameRequired"));
         return;
       }
       setError(null);
@@ -172,12 +174,12 @@ export default function DocSidebar({
         setAnswerMode("reference");
         await onRefreshAgents();
       } catch (e) {
-        setError(e instanceof ApiError ? e.message : "创建失败，请重试");
+        setError(e instanceof ApiError ? e.message : t("errors.createFailed"));
       } finally {
         setCreating(false);
       }
     },
-    [answerMode, description, emoji, model, name, onRefreshAgents, persona],
+    [answerMode, description, emoji, model, name, onRefreshAgents, persona, t],
   );
 
   return (
@@ -185,14 +187,14 @@ export default function DocSidebar({
       {/* 专家列表 */}
       <div>
         <div className="mb-1.5 flex items-center justify-between">
-          <h2 className="text-sm font-semibold text-zinc-800 dark:text-zinc-100">专家</h2>
+          <h2 className="text-sm font-semibold text-foreground">{t("experts.title")}</h2>
           <button
             type="button"
             onClick={() => setShowCreate(true)}
             data-testid="create-agent-button"
             className="rounded-lg border border-zinc-200 px-2 py-1 text-[11px] text-zinc-600 transition-colors hover:border-indigo-300 hover:text-indigo-600 dark:border-zinc-700 dark:text-zinc-300 dark:hover:border-indigo-700 dark:hover:text-indigo-300"
           >
-            + 新建
+            + {t("nav.newExpert")}
           </button>
         </div>
         <ul className="thin-scroll flex max-h-44 flex-col gap-1 overflow-y-auto" data-testid="agent-list">
@@ -228,7 +230,7 @@ export default function DocSidebar({
                 {!agent.builtin && (
                   <button
                     type="button"
-                    aria-label={`删除专家 ${agent.name}`}
+                    aria-label={`${t("nav.deleteExpert")} ${agent.name}`}
                     onClick={() => void handleDeleteAgent(agent)}
                     className="absolute right-1.5 top-1.5 rounded px-1 text-[11px] text-zinc-400 opacity-0 transition-opacity hover:text-red-600 focus:opacity-100 group-hover:opacity-100"
                   >
@@ -248,34 +250,34 @@ export default function DocSidebar({
           data-testid="create-agent-form"
           className="flex flex-col gap-2 rounded-xl border border-indigo-200 bg-indigo-50/40 p-3 dark:border-indigo-800 dark:bg-indigo-900/15"
         >
-          <p className="text-xs font-semibold text-indigo-700 dark:text-indigo-300">新建专家</p>
+          <p className="text-xs font-semibold text-primary">{t("nav.newExpert")}</p>
           <input
             value={name}
             onChange={(e) => setName(e.target.value)}
-            placeholder="名称，如：健身教练"
-            aria-label="专家名称"
+            placeholder={t("experts.namePlaceholder")}
+            aria-label={t("experts.name")}
             data-testid="agent-name-input"
             className="rounded-lg border border-zinc-200 bg-white px-2.5 py-1.5 text-xs outline-none focus:border-indigo-400 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-100"
           />
           <input
             value={emoji}
             onChange={(e) => setEmoji(e.target.value)}
-            placeholder="图标（可选），如 💪"
-            aria-label="专家图标"
+            placeholder={t("experts.iconPlaceholder")}
+            aria-label={t("experts.customEmoji")}
             className="rounded-lg border border-zinc-200 bg-white px-2.5 py-1.5 text-xs outline-none focus:border-indigo-400 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-100"
           />
           <input
             value={description}
             onChange={(e) => setDescription(e.target.value)}
-            placeholder="一句话简介（可选）"
-            aria-label="专家简介"
+            placeholder={t("experts.descriptionPlaceholder")}
+            aria-label={t("experts.description")}
             className="rounded-lg border border-zinc-200 bg-white px-2.5 py-1.5 text-xs outline-none focus:border-indigo-400 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-100"
           />
           <textarea
             value={persona}
             onChange={(e) => setPersona(e.target.value)}
-            placeholder="人设：这个专家怎么说话、擅长什么、回答边界（可选但建议填）"
-            aria-label="专家人设"
+            placeholder={t("experts.personaPlaceholder")}
+            aria-label={t("experts.persona")}
             rows={4}
             data-testid="agent-persona-input"
             className="resize-y rounded-lg border border-zinc-200 bg-white px-2.5 py-1.5 text-xs outline-none focus:border-indigo-400 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-100"
@@ -283,12 +285,12 @@ export default function DocSidebar({
           <input
             value={model}
             onChange={(e) => setModel(e.target.value)}
-            placeholder="模型名（可选，留空用默认模型）"
-            aria-label="专家模型"
+            placeholder={t("experts.modelPlaceholder")}
+            aria-label={t("experts.modelPlaceholder")}
             className="rounded-lg border border-zinc-200 bg-white px-2.5 py-1.5 text-xs outline-none focus:border-indigo-400 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-100"
           />
           <fieldset className="flex flex-col gap-1" data-testid="answer-mode-fieldset">
-            <legend className="text-[11px] text-zinc-500">回答模式</legend>
+            <legend className="text-[11px] text-muted-foreground">{t("experts.answerModeLabel", { mode: "" })}</legend>
             <label className="flex cursor-pointer items-center gap-1.5 text-xs text-zinc-700 dark:text-zinc-300">
               <input
                 type="radio"
@@ -298,7 +300,7 @@ export default function DocSidebar({
                 onChange={() => setAnswerMode("reference")}
                 data-testid="mode-reference"
               />
-              参考模式：知识库优先，可用一般知识补充（标注来源）
+              {t("experts.referenceModeDesc")}
             </label>
             <label className="flex cursor-pointer items-center gap-1.5 text-xs text-zinc-700 dark:text-zinc-300">
               <input
@@ -309,7 +311,7 @@ export default function DocSidebar({
                 onChange={() => setAnswerMode("strict")}
                 data-testid="mode-strict"
               />
-              严格模式：只答知识库，没有依据就拒答
+              {t("experts.strictModeDesc")}
             </label>
           </fieldset>
           <div className="flex gap-2">
@@ -319,14 +321,14 @@ export default function DocSidebar({
               data-testid="agent-submit"
               className="brand-gradient rounded-lg px-3 py-1.5 text-xs font-medium text-white shadow-sm transition-all hover:shadow-md active:scale-95 disabled:opacity-50"
             >
-              {creating ? "创建中…" : "创建"}
+              {creating ? t("experts.creating") : t("experts.createButton")}
             </button>
             <button
               type="button"
               onClick={() => setShowCreate(false)}
               className="rounded-lg border border-zinc-200 px-3 py-1.5 text-xs text-zinc-600 transition-colors hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
             >
-              取消
+              {t("common.cancel")}
             </button>
           </div>
         </form>
@@ -342,7 +344,7 @@ export default function DocSidebar({
       <div className="flex min-h-0 flex-1 flex-col gap-2">
         <div className="flex items-center justify-between">
           <h2 className="text-sm font-semibold text-zinc-800 dark:text-zinc-100">
-            {activeAgent?.name ?? "专家"}的文档
+            {t("nav.docsOfAgent", { name: activeAgent?.name ?? t("experts.title") })}
             <span className="ml-1 text-xs font-normal text-zinc-400">{docs.length}</span>
           </h2>
           <button
@@ -351,13 +353,13 @@ export default function DocSidebar({
             disabled={uploading}
             className="brand-gradient rounded-lg px-3 py-1.5 text-xs font-medium text-white shadow-sm transition-all hover:shadow-md active:scale-95 disabled:opacity-50"
           >
-            {uploading ? "上传中…" : "+ 上传"}
+            {uploading ? t("nav.uploading") : `+ ${t("nav.uploadAction")}`}
           </button>
           <input
             ref={inputRef}
             type="file"
             accept={ACCEPT.join(",")}
-            aria-label="选择要上传的文档"
+            aria-label={t("nav.selectDocToUpload")}
             data-testid="file-input"
             className="hidden"
             onChange={(e) => void handleFile(e.target.files?.[0])}
@@ -365,14 +367,14 @@ export default function DocSidebar({
         </div>
 
         <div className="thin-scroll min-h-0 flex-1 overflow-y-auto">
-          {docsLoading && <p className="text-xs text-zinc-400">加载中…</p>}
+          {docsLoading && <p className="text-xs text-muted-foreground">{t("common.loading")}</p>}
 
           {!docsLoading && docs.length === 0 && (
             <div className="rounded-xl border border-dashed border-zinc-200 p-4 text-center text-xs leading-relaxed text-zinc-400 dark:border-zinc-700">
               <div className="mb-1 text-2xl">📂</div>
-              这位专家还没有文档。
+              {t("nav.noDocsForAgent")}
               <br />
-              上传 TXT / MD / PDF 作为它的知识库。
+              {t("nav.noDocsForAgentHint")}
             </div>
           )}
 
@@ -390,17 +392,17 @@ export default function DocSidebar({
                     {doc.filename}
                   </p>
                   <p className="mt-0.5 text-[11px] text-zinc-400">
-                    {doc.chunks} 片段 · {formatSize(doc.size)}
+                    {t("nav.chunks", { n: doc.chunks })} · {formatSize(doc.size)}
                     {doc.uploaded_at ? ` · ${formatTime(doc.uploaded_at)}` : ""}
                   </p>
                 </div>
                 <button
                   type="button"
-                  aria-label={`删除 ${doc.filename}`}
+                  aria-label={`${t("common.delete")} ${doc.filename}`}
                   onClick={() => void handleDeleteDoc(doc)}
                   className="shrink-0 rounded px-1 text-zinc-400 opacity-0 transition-opacity hover:text-red-600 focus:opacity-100 group-hover:opacity-100"
                 >
-                  删除
+                  {t("common.delete")}
                 </button>
               </li>
             ))}
@@ -409,7 +411,7 @@ export default function DocSidebar({
       </div>
 
       <p className="text-[11px] leading-relaxed text-zinc-400">
-        支持 {ACCEPT.join(" / ")}，单文件不超过 {MAX_MB}MB
+        {t("nav.supportedFormats", { formats: ACCEPT.join(" / "), mb: MAX_MB })}
       </p>
     </aside>
   );
