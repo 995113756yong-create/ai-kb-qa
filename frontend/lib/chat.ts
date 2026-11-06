@@ -4,6 +4,7 @@ import type { SearchHit, Segment, Source, ToolCallArgs } from "@/lib/types";
 // 前者是渲染用的视图模型，后者是接口契约。
 
 export type Step =
+  | { kind: "rewrite"; key: string; original: string; rewritten: string }
   | { kind: "intent"; key: string; intent: string; reason: string }
   | { kind: "thought"; key: string; text: string }
   | { kind: "decompose"; key: string; queries: string[] }
@@ -37,6 +38,8 @@ export type ChatMessage =
       stopped: boolean;
       error: string | null;
       elapsedMs: number | null;
+      /** 多轮改写后的问题，只在发生改写时有值 */
+      rewrittenQuestion?: string | null;
       createdAt: number;
       /** 当前推理阶段，运行中有值 */
       phase: Phase;

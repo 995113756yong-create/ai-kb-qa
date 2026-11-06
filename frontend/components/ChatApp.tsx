@@ -18,6 +18,7 @@ import type { AskResponse, AgentInfo, AgentCreateRequest } from "@/lib/types";
 import type { ChatMessage } from "@/lib/chat";
 import { ask, listAgents, createAgent, deleteAgent } from "@/lib/api";
 import { useAgentRun } from "@/lib/useAgentRun";
+import { buildHistory } from "@/lib/history";
 import { useConversations } from "@/lib/useConversations";
 import { useDocs } from "@/hooks/useDocs";
 import { useHotkeys, type HotkeyHandlers } from "@/hooks/useHotkeys";
@@ -171,6 +172,10 @@ export default function ChatApp({ initialAgentId, initialConversationId }: Props
       runTargetRef.current = null;
       let convId = currentId;
       if (!convId) convId = create();
+
+      // 先取本轮之前的消息构造 history（appendMessages 之后取会把本轮问题算进去）
+      const history = buildHistory(convId ? (conversations.find((c) => c.id === convId)?.messages ?? []) : []);
+
       ensureTitle(convId, question);
       appendMessages(convId, [{ id: `u-${Date.now()}`, role: "user", text: question, createdAt: Date.now() }]);
       setEvidence(null);
@@ -234,6 +239,7 @@ export default function ChatApp({ initialAgentId, initialConversationId }: Props
         question,
         mode: "agent",
         answerMode: answerMode ?? undefined,
+        history,
         message: (msg) => {
           // run 注入完整 assistant 占位消息，追加进当前会话并登记为本轮更新目标
           if (convId) {
@@ -244,7 +250,19 @@ export default function ChatApp({ initialAgentId, initialConversationId }: Props
         update: updateLast,
       });
     },
-    [activeAgentId, answerMode, appendMessages, create, currentId, ensureTitle, mode, run, running, updateLast],
+    [
+      activeAgentId,
+      answerMode,
+      appendMessages,
+      conversations,
+      create,
+      currentId,
+      ensureTitle,
+      mode,
+      run,
+      running,
+      updateLast,
+    ],
   );
 
   const stop = useCallback(() => {
@@ -366,6 +384,18 @@ export default function ChatApp({ initialAgentId, initialConversationId }: Props
         <div className="flex min-h-0 flex-1">
           <div className="flex min-w-0 flex-1 flex-col">
             <MessageList messages={messages} onJumpToSource={jumpToSource} />
+            {mode === "fast" && messages.length > 0 ? (
+              <div className="flex items-center justify-center gap-1.5 border-t border-border/60 bg-muted/30 px-4 py-1.5 text-[11px] text-muted-foreground">
+                快速模式不理解上下文，追问请切换到 Agent 模式
+                <button
+                  type="button"
+                  onClick={() => setMode("agent")}
+                  className="font-medium text-primary underline underline-offset-2"
+                >
+                  切换
+                </button>
+              </div>
+            ) : null}
             <ChatInput disabled={false} running={running} onSend={send} onStop={stop} />
           </div>
 

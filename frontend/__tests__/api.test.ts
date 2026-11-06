@@ -259,3 +259,34 @@ describe("getChunk（M0.2 契约对齐）", () => {
     expect(url).toContain("agent_id=kb-agent");
   });
 });
+
+describe("streamAgent 的 history（M2.3）", () => {
+  it("history 非空时写进 body", async () => {
+    const spy = mockFetch(501, { detail: "stop" });
+    const history = [
+      { role: "user" as const, content: "产品 A 的月费是多少？" },
+      { role: "assistant" as const, content: "30 元。" },
+    ];
+
+    await expect(
+      streamAgent({ question: "那产品 B 呢？", onEvent: () => {}, history }),
+    ).rejects.toThrow(ApiError);
+
+    const [, init] = spy.mock.calls[0] as [string, RequestInit];
+    const body = JSON.parse(String(init.body));
+    expect(body.history).toHaveLength(2);
+    expect(body.history[0]).toEqual({ role: "user", content: "产品 A 的月费是多少？" });
+  });
+
+  it("history 为空数组时 body 里不出现该字段", async () => {
+    const spy = mockFetch(501, { detail: "stop" });
+
+    await expect(
+      streamAgent({ question: "问题", onEvent: () => {}, history: [] }),
+    ).rejects.toThrow(ApiError);
+
+    const [, init] = spy.mock.calls[0] as [string, RequestInit];
+    const body = JSON.parse(String(init.body));
+    expect(body).not.toHaveProperty("history");
+  });
+});

@@ -7,6 +7,7 @@ import type {
   FeedbackRequest,
   AskResponse,
   DeleteResponse,
+  HistoryTurn,
   DocListResponse,
   UploadResponse,
 } from "@/lib/types";
@@ -180,6 +181,8 @@ export type StreamAgentOptions = {
   /** strict = 拒答优先；reference = 默认引用模式。 */
   mode?: "strict" | "reference";
   agentId?: string;
+  /** 多轮：最近几轮对话，只用于把追问改写成独立问题 */
+  history?: HistoryTurn[];
 };
 
 export async function streamAgent(
@@ -199,6 +202,7 @@ export async function streamAgent(
   // agent_id 必须放进请求体：后端 AgentRequest 只解析 body，
   // 只放 URL 查询串会被忽略（曾在多专家平台上线时踩过这个坑）。
   const body: Record<string, unknown> = { question };
+  if (opts.history && opts.history.length) body.history = opts.history;
   if (aid && aid !== DEFAULT_AGENT) {
     body.agent_id = aid;
   }

@@ -155,6 +155,7 @@ type ToolResultEvent = {
   hits?: SearchHit[];
 };
 type AnswerDeltaEvent = { type: "answer_delta"; text: string };
+type RewriteEvent = { type: "rewrite"; original: string; rewritten: string };
 type FinalEvent = {
   type: "final";
   answer: string;
@@ -167,6 +168,8 @@ type FinalEvent = {
   grounded_ratio?: number | null;
   segments?: Segment[];
   usage?: UsageInfo;
+  /** 多轮追问改写后的问题，只在发生改写时出现 */
+  rewritten_question?: string;
 };
 type ErrorEvent = { type: "error"; detail: string };
 type PhaseEvent = { type: "phase"; phase: "research" | "answer" };
@@ -180,11 +183,15 @@ export type AgentEvent =
   | ToolCallEvent
   | ToolResultEvent
   | AnswerDeltaEvent
+  | RewriteEvent
   | FinalEvent
   | ErrorEvent
   | PhaseEvent;
 
 export type AgentEventType = AgentEvent["type"];
+
+/** 多轮历史的一轮。只用于把追问改写成独立问题，不进入研究与回答。 */
+export type HistoryTurn = { role: "user" | "assistant"; content: string };
 
 export type ChatMode = "agent" | "fast";
 
