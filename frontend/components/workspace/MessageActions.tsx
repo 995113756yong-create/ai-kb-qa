@@ -8,6 +8,7 @@ import { useState } from "react";
 import { toast } from "sonner";
 
 import { sendFeedback } from "@/lib/api";
+import type { Source } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 export type MessageActionsProps = {
@@ -16,11 +17,22 @@ export type MessageActionsProps = {
   agentId?: string;
   mode?: string | null;
   groundedRatio?: number | null;
+  /** 证据列表：用于「复制（带出处）」 */
+  sources?: Source[] | null;
   className?: string;
 };
 
-export function MessageActions({ answer, question, agentId, mode, groundedRatio, className }: MessageActionsProps) {
+export function MessageActions({
+  answer,
+  question,
+  agentId,
+  mode,
+  groundedRatio,
+  sources,
+  className,
+}: MessageActionsProps) {
   const [copied, setCopied] = useState(false);
+  const [copiedWithSources, setCopiedWithSources] = useState(false);
   const [rating, setRating] = useState<"up" | "down" | null>(null);
 
   const onCopy = async () => {
@@ -28,6 +40,28 @@ export function MessageActions({ answer, question, agentId, mode, groundedRatio,
       await navigator.clipboard.writeText(answer);
       setCopied(true);
       window.setTimeout(() => setCopied(false), 1500);
+    } catch {
+      toast.error("复制失败");
+    }
+  };
+
+  // 复制正文（去掉 [n]），末尾附出处清单
+  const onCopyWithSources = async () => {
+    // 去掉 [n] 后可能留下多余空格（"30 元 [1]。" -> "30 元 。"），顺带清理
+    const body = answer
+      .replace(/\[\d+\]/g, "")
+      .replace(/[ \t]+([。！？!?；;，,])/g, "$1")
+      .replace(/[ \t]{2,}/g, " ")
+      .trim();
+    const lines = (sources ?? []).map(
+      (s) =>
+        `[${s.index}] ${s.source ?? "未知文档"}${s.page !== null && s.page !== undefined ? ` 第 ${s.page} 页` : ""}`,
+    );
+    const text = lines.length ? `${body}\n\n出处：\n${lines.join("\n")}` : body;
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopiedWithSources(true);
+      window.setTimeout(() => setCopiedWithSources(false), 1500);
     } catch {
       toast.error("复制失败");
     }
@@ -61,6 +95,15 @@ export function MessageActions({ answer, question, agentId, mode, groundedRatio,
         className="rounded-md px-2 py-1 transition-colors hover:bg-muted hover:text-foreground"
       >
         {copied ? "已复制" : "复制"}
+      </button>
+      <span className="text-border">|</span>
+      <button
+        type="button"
+        data-testid="copy-with-sources"
+        onClick={() => void onCopyWithSources()}
+        className="rounded-md px-2 py-1 transition-colors hover:bg-muted hover:text-foreground"
+      >
+        {copiedWithSources ? "已复制" : "复制（带出处）"}
       </button>
       <span className="text-border">|</span>
       <button

@@ -10,7 +10,45 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 
 from app.main import create_app  # noqa: E402
 
+
 FAKE_ANSWER = "根据文档，答案是 42 [1]"
+
+
+class FakeAgentLLM:
+    """AgentLLM 协议的最小实现：run_agent 只用 chat 与 stream。
+
+    用在 client fixture 里，让 /api/agent/stream 在没有 OPENAI_API_KEY 的
+    CI 环境也能跑通（否则 agent_llm 为 None 会直接 503）。
+    """
+
+    def __init__(self, answer: str = FAKE_ANSWER):
+        self.answer = answer
+        self.calls = 0
+
+    def chat(self, messages):  # noqa: ANN001
+        from app.agent.llm import AssistantTurn
+
+        self.calls += 1
+        # 首轮返回一个检索工具调用，模拟真实 ReAct 的第一步
+        if self.calls == 1:
+            from app.agent.llm import ToolCall
+
+            return AssistantTurn(
+                content="",
+                tool_calls=[
+                    ToolCall(
+                        id="call-1",
+                        name="search_kb",
+                        arguments='{"query": "%s"}' % "检索",
+                    )
+                ],
+            )
+        return AssistantTurn(content="够了")
+
+    def stream(self, messages):  # noqa: ANN001
+        # 流式回答：逐字产出，供 run_agent 拼 answer_delta
+        for i in range(0, len(self.answer), 8):
+            yield self.answer[i : i + 8]
 
 
 @pytest.fixture
@@ -32,7 +70,12 @@ def dirs(tmp_path):
 
 
 @pytest.fixture
-def client(embeddings, llm, dirs):
+def fake_agent_llm():
+    return FakeAgentLLM()
+
+
+@pytest.fixture
+def client(embeddings, llm, dirs, fake_agent_llm):
     upload_dir, index_dir = dirs
     app = create_app(
         embeddings=embeddings,
@@ -40,6 +83,7 @@ def client(embeddings, llm, dirs):
         upload_dir=upload_dir,
         index_dir=index_dir,
         max_upload_mb=1,
+        agent_llm=fake_agent_llm,
     )
     with TestClient(app) as c:
         yield c

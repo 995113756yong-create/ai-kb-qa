@@ -6,7 +6,7 @@ import type { ChatMessage, Phase, Step } from "@/lib/chat";
 import { advancePhase } from "@/lib/chat";
 import { streamAgent } from "@/lib/api";
 import { stripRawCitations } from "@/lib/answer";
-import type { AgentEvent } from "@/lib/types";
+import type { AgentEvent, HistoryTurn } from "@/lib/types";
 
 // 一次 Agent 运行的编排器：把 SSE 事件归约成消息状态。
 // 流式 answer_delta 先入缓冲区，requestAnimationFrame 每帧最多刷新一次；
@@ -24,6 +24,8 @@ type StreamParams = {
   mode: "agent" | "fast";
   /** 专家配置的回答模式（strict|reference），agent 交互模式下透传 */
   answerMode?: "strict" | "reference";
+  /** 多轮：最近几轮对话，只用于把追问改写成独立问题 */
+  history?: HistoryTurn[];
   signal: AbortSignal;
   onEvent: (event: AgentEvent) => void;
 };
@@ -150,6 +152,7 @@ export function useAgentRun(options: Options = {}) {
             question: streamRest.question,
             mode: answerMode,
             signal: controller.signal,
+            history: streamRest.history,
             onEvent: (event) => {
               switch (event.type) {
                 case "phase":
@@ -157,6 +160,17 @@ export function useAgentRun(options: Options = {}) {
                   break;
                 case "step":
                   patch((m) => ({ ...m, phase: phaseFromEvent(event, m.phase) }));
+                  break;
+                case "rewrite":
+                  appendStep(
+                    {
+                      kind: "rewrite",
+                      key: "rewrite",
+                      original: event.original,
+                      rewritten: event.rewritten,
+                    },
+                    current.phase,
+                  );
                   break;
                 case "intent":
                   appendStep(
@@ -201,6 +215,7 @@ export function useAgentRun(options: Options = {}) {
                     groundedRatio: event.grounded_ratio ?? null,
                     answerMode: event.mode ?? null,
                     elapsedMs: event.elapsed_ms,
+                    rewrittenQuestion: event.rewritten_question ?? null,
                     phase: "done",
                   };
                   current = finished;

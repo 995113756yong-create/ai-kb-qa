@@ -1,6 +1,15 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { ApiError, ask, deleteAgent, deleteDoc, listDocs, streamAgent, uploadDoc } from "@/lib/api";
+import {
+  ApiError,
+  ask,
+  deleteAgent,
+  deleteDoc,
+  getChunk,
+  listDocs,
+  streamAgent,
+  uploadDoc,
+} from "@/lib/api";
 
 function mockFetch(status: number, body: unknown) {
   const spy = vi.fn().mockResolvedValue({
@@ -195,5 +204,89 @@ describe("agent_id 参数路由", () => {
     const [url, init] = spy.mock.calls[0] as [string, RequestInit];
     expect(url).toBe("/api/agent/stream");
     expect(JSON.parse(String(init.body))).toEqual({ question: "苹果" });
+  });
+});
+
+describe("getChunk（M0.2 契约对齐）", () => {
+  it("查询参数用 neighbors，不是 window", async () => {
+    const spy = mockFetch(200, {
+      status: "ok",
+      chunk: {
+        chunk_id: "d0:0",
+        doc_id: "d0",
+        source: "产品A.txt",
+        page: null,
+        content: "产品 A 的月费是 30 元。",
+      },
+    });
+
+    await getChunk("d0:0", "default");
+
+    const [url] = spy.mock.calls[0] as [string, RequestInit];
+    expect(url).toContain("neighbors=1");
+    expect(url).not.toContain("window=");
+  });
+
+  it("能解析出 chunk.content（旧实现读 res.text 拿到 undefined）", async () => {
+    mockFetch(200, {
+      status: "ok",
+      chunk: {
+        chunk_id: "d0:0",
+        doc_id: "d0",
+        source: "产品A.txt",
+        page: 2,
+        content: "产品 A 的月费是 30 元。",
+        neighbors: [],
+      },
+    });
+
+    const res = await getChunk("d0:0", "default");
+    expect(res.chunk.content).toBe("产品 A 的月费是 30 元。");
+    expect(res.chunk.source).toBe("产品A.txt");
+    expect(res.chunk.page).toBe(2);
+  });
+
+  it("可指定 neighbors 数量", async () => {
+    const spy = mockFetch(200, {
+      status: "ok",
+      chunk: { chunk_id: "d0:0", doc_id: "d0", source: null, page: null, content: "x" },
+    });
+
+    await getChunk("d0:0", "kb-agent", 2);
+
+    const [url] = spy.mock.calls[0] as [string, RequestInit];
+    expect(url).toContain("neighbors=2");
+    expect(url).toContain("agent_id=kb-agent");
+  });
+});
+
+describe("streamAgent 的 history（M2.3）", () => {
+  it("history 非空时写进 body", async () => {
+    const spy = mockFetch(501, { detail: "stop" });
+    const history = [
+      { role: "user" as const, content: "产品 A 的月费是多少？" },
+      { role: "assistant" as const, content: "30 元。" },
+    ];
+
+    await expect(
+      streamAgent({ question: "那产品 B 呢？", onEvent: () => {}, history }),
+    ).rejects.toThrow(ApiError);
+
+    const [, init] = spy.mock.calls[0] as [string, RequestInit];
+    const body = JSON.parse(String(init.body));
+    expect(body.history).toHaveLength(2);
+    expect(body.history[0]).toEqual({ role: "user", content: "产品 A 的月费是多少？" });
+  });
+
+  it("history 为空数组时 body 里不出现该字段", async () => {
+    const spy = mockFetch(501, { detail: "stop" });
+
+    await expect(
+      streamAgent({ question: "问题", onEvent: () => {}, history: [] }),
+    ).rejects.toThrow(ApiError);
+
+    const [, init] = spy.mock.calls[0] as [string, RequestInit];
+    const body = JSON.parse(String(init.body));
+    expect(body).not.toHaveProperty("history");
   });
 });

@@ -11,13 +11,15 @@ import CommandPalette from "@/components/CommandPalette";
 import MessageList from "@/components/MessageList";
 import AppSidebar from "@/components/workspace/AppSidebar";
 import { AdminTokenDialog } from "@/components/workspace/AdminTokenDialog";
-import { EvidencePanel } from "@/components/workspace/EvidencePanel";
+import { EvidenceDrawer } from "@/components/workspace/EvidenceDrawer";
+import { EvidenceReader } from "@/components/workspace/EvidenceReader";
 import { toast } from "sonner";
 
 import type { AskResponse, AgentInfo, AgentCreateRequest } from "@/lib/types";
 import type { ChatMessage } from "@/lib/chat";
 import { ask, listAgents, createAgent, deleteAgent } from "@/lib/api";
 import { useAgentRun } from "@/lib/useAgentRun";
+import { buildHistory } from "@/lib/history";
 import { useConversations } from "@/lib/useConversations";
 import { useDocs } from "@/hooks/useDocs";
 import { useHotkeys, type HotkeyHandlers } from "@/hooks/useHotkeys";
@@ -35,7 +37,8 @@ export default function ChatApp({ initialAgentId, initialConversationId }: Props
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [mode, setMode] = useState<"agent" | "fast">("agent");
   const [tokenOpen, setTokenOpen] = useState(false);
-  const [evidence, setEvidence] = useState<{ messageId: string; index: number } | null>(null);
+  // 用引用编号 n（从 1 开始），不用数组下标
+  const [evidence, setEvidence] = useState<{ messageId: string; n: number } | null>(null);
 
   const activeAgent = useMemo(
     () => agents.find((a) => a.agent_id === activeAgentId) ?? null,
@@ -170,6 +173,10 @@ export default function ChatApp({ initialAgentId, initialConversationId }: Props
       runTargetRef.current = null;
       let convId = currentId;
       if (!convId) convId = create();
+
+      // 先取本轮之前的消息构造 history（appendMessages 之后取会把本轮问题算进去）
+      const history = buildHistory(convId ? (conversations.find((c) => c.id === convId)?.messages ?? []) : []);
+
       ensureTitle(convId, question);
       appendMessages(convId, [{ id: `u-${Date.now()}`, role: "user", text: question, createdAt: Date.now() }]);
       setEvidence(null);
@@ -233,6 +240,7 @@ export default function ChatApp({ initialAgentId, initialConversationId }: Props
         question,
         mode: "agent",
         answerMode: answerMode ?? undefined,
+        history,
         message: (msg) => {
           // run 注入完整 assistant 占位消息，追加进当前会话并登记为本轮更新目标
           if (convId) {
@@ -243,7 +251,19 @@ export default function ChatApp({ initialAgentId, initialConversationId }: Props
         update: updateLast,
       });
     },
-    [activeAgentId, answerMode, appendMessages, create, currentId, ensureTitle, mode, run, running, updateLast],
+    [
+      activeAgentId,
+      answerMode,
+      appendMessages,
+      conversations,
+      create,
+      currentId,
+      ensureTitle,
+      mode,
+      run,
+      running,
+      updateLast,
+    ],
   );
 
   const stop = useCallback(() => {
@@ -268,8 +288,18 @@ export default function ChatApp({ initialAgentId, initialConversationId }: Props
     [cancel, syncAddress],
   );
 
-  const jumpToSource = useCallback((messageId: string, index: number) => {
-    setEvidence({ messageId, index });
+  // 阅读器「被引用于」点句子：滚到该句并闪烁
+  const focusSentence = useCallback((messageId: string, segmentIndex: number) => {
+    const el = document.getElementById(`${messageId}-seg-${segmentIndex}`);
+    if (!el) return;
+    el.scrollIntoView({ block: "center", behavior: "smooth" });
+    el.classList.remove("sentence-flash");
+    void el.offsetWidth;
+    el.classList.add("sentence-flash");
+  }, []);
+
+  const jumpToSource = useCallback((messageId: string, n: number) => {
+    setEvidence({ messageId, n });
   }, []);
 
   // ---------- 快捷键 ----------
@@ -282,6 +312,28 @@ export default function ChatApp({ initialAgentId, initialConversationId }: Props
     [],
   );
   useHotkeys(hotkeys);
+
+  // ---------- 证据阅读器 ----------
+  const evidenceMessage = evidence
+    ? messages.find(
+        (m): m is ChatMessage & { role: "assistant" } =>
+          m.id === evidence.messageId && m.role === "assistant",
+      )
+    : undefined;
+
+  const handleSelectEvidence = useCallback(
+    (next: number) => {
+      setEvidence((prev) => (prev ? { ...prev, n: next } : prev));
+    },
+    [],
+  );
+
+  const handleFocusSentence = useCallback(
+    (i: number) => {
+      if (evidence) focusSentence(evidence.messageId, i);
+    },
+    [evidence, focusSentence],
+  );
 
   // ---------- 渲染 ----------
   return (
@@ -364,27 +416,58 @@ export default function ChatApp({ initialAgentId, initialConversationId }: Props
         {/* 消息区 */}
         <div className="flex min-h-0 flex-1">
           <div className="flex min-w-0 flex-1 flex-col">
-            <MessageList messages={messages} onJumpToSource={jumpToSource} />
+            <MessageList
+              messages={messages}
+              onJumpToSource={jumpToSource}
+              starters={activeAgent?.starter_questions}
+              onPickStarter={(q) => send(q)}
+              agentName={activeAgent?.name}
+              docCount={docs.length}
+            />
+            {mode === "fast" && messages.length > 0 ? (
+              <div className="flex items-center justify-center gap-1.5 border-t border-border/60 bg-muted/30 px-4 py-1.5 text-[11px] text-muted-foreground">
+                快速模式不理解上下文，追问请切换到 Agent 模式
+                <button
+                  type="button"
+                  onClick={() => setMode("agent")}
+                  className="font-medium text-primary underline underline-offset-2"
+                >
+                  切换
+                </button>
+              </div>
+            ) : null}
             <ChatInput disabled={false} running={running} onSend={send} onStop={stop} />
           </div>
 
-          {/* 证据侧栏 */}
-          {evidence && (() => {
-            const evidenceMessage = messages.find(
-              (m): m is ChatMessage & { role: "assistant" } => m.id === evidence.messageId && m.role === "assistant",
-            );
-            if (!evidenceMessage) return null;
-            return (
-              <aside className="hidden w-96 shrink-0 overflow-y-auto border-l border-border/60 lg:block">
-                <EvidencePanel
+          {/* 证据侧栏：桌面右侧栏；移动端走底部抽屉（同一个阅读器组件） */}
+          {evidenceMessage && (
+            <>
+              <aside className="hidden w-96 shrink-0 overflow-hidden border-l border-border/60 lg:block">
+                <EvidenceReader
                   message={evidenceMessage}
-                  index={evidence.index}
+                  n={evidence!.n}
+                  onSelect={handleSelectEvidence}
+                  onFocusSentence={handleFocusSentence}
                   agentId={activeAgentId}
                   onClose={() => setEvidence(null)}
+                  className="h-full"
                 />
               </aside>
-            );
-          })()}
+
+              <EvidenceDrawer
+                open
+                onOpenChange={(open) => {
+                  if (!open) setEvidence(null);
+                }}
+                message={evidenceMessage}
+                n={evidence!.n}
+                onSelect={handleSelectEvidence}
+                onFocusSentence={handleFocusSentence}
+                agentId={activeAgentId}
+                onClose={() => setEvidence(null)}
+              />
+            </>
+          )}
         </div>
       </main>
 

@@ -65,12 +65,17 @@ export type SearchHit = {
 };
 
 /** B6：GET /api/chunks/{chunk_id} 响应 */
-export type ChunkResponse = {
-  status: "ok";
+/** 片段详情。字段与后端 GET /api/chunks/{chunk_id} 的实际响应一致。 */
+export type ChunkDetail = {
   chunk_id: string;
-  text: string;
-  neighbors?: { before: string[]; after: string[] };
+  doc_id: string | null;
+  source: string | null;
+  page: number | null;
+  content: string;
+  neighbors?: Omit<ChunkDetail, "neighbors">[];
 };
+
+export type ChunkResponse = { status: "ok"; chunk: ChunkDetail };
 
 /** POST /api/feedback 请求体 */
 export type FeedbackRequest = {
@@ -150,6 +155,7 @@ type ToolResultEvent = {
   hits?: SearchHit[];
 };
 type AnswerDeltaEvent = { type: "answer_delta"; text: string };
+type RewriteEvent = { type: "rewrite"; original: string; rewritten: string };
 type FinalEvent = {
   type: "final";
   answer: string;
@@ -162,6 +168,8 @@ type FinalEvent = {
   grounded_ratio?: number | null;
   segments?: Segment[];
   usage?: UsageInfo;
+  /** 多轮追问改写后的问题，只在发生改写时出现 */
+  rewritten_question?: string;
 };
 type ErrorEvent = { type: "error"; detail: string };
 type PhaseEvent = { type: "phase"; phase: "research" | "answer" };
@@ -175,11 +183,37 @@ export type AgentEvent =
   | ToolCallEvent
   | ToolResultEvent
   | AnswerDeltaEvent
+  | RewriteEvent
   | FinalEvent
   | ErrorEvent
   | PhaseEvent;
 
 export type AgentEventType = AgentEvent["type"];
+
+/** 文档原文里的一个片段：偏移以 pages[page_index].text 为基准 */
+export type DocContentChunk = {
+  chunk_id: string;
+  chunk_index: number;
+  page: number | null;
+  /** 该片段所在页在 pages 数组里的下标 */
+  page_index: number;
+  start: number;
+  end: number;
+};
+
+export type DocContent = {
+  status: "ok";
+  doc_id: string;
+  filename: string;
+  /** 原文文件存在且全部片段有偏移；false 表示旧文档，走降级 */
+  precise: boolean;
+  truncated: boolean;
+  pages: { page: number | null; text: string }[];
+  chunks: DocContentChunk[];
+};
+
+/** 多轮历史的一轮。只用于把追问改写成独立问题，不进入研究与回答。 */
+export type HistoryTurn = { role: "user" | "assistant"; content: string };
 
 export type ChatMode = "agent" | "fast";
 

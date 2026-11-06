@@ -7,6 +7,8 @@ import type {
   FeedbackRequest,
   AskResponse,
   DeleteResponse,
+  DocContent,
+  HistoryTurn,
   DocListResponse,
   UploadResponse,
 } from "@/lib/types";
@@ -180,6 +182,8 @@ export type StreamAgentOptions = {
   /** strict = 拒答优先；reference = 默认引用模式。 */
   mode?: "strict" | "reference";
   agentId?: string;
+  /** 多轮：最近几轮对话，只用于把追问改写成独立问题 */
+  history?: HistoryTurn[];
 };
 
 export async function streamAgent(
@@ -199,6 +203,7 @@ export async function streamAgent(
   // agent_id 必须放进请求体：后端 AgentRequest 只解析 body，
   // 只放 URL 查询串会被忽略（曾在多专家平台上线时踩过这个坑）。
   const body: Record<string, unknown> = { question };
+  if (opts.history && opts.history.length) body.history = opts.history;
   if (aid && aid !== DEFAULT_AGENT) {
     body.agent_id = aid;
   }
@@ -234,13 +239,27 @@ export async function streamAgent(
   parser.flush();
 }
 
-export async function getChunk(chunkId: string, agentId: string, window = 1): Promise<ChunkResponse> {
-  const params = new URLSearchParams({ agent_id: agentId, window: String(window) });
+export async function getChunk(
+  chunkId: string,
+  agentId: string,
+  neighbors = 1,
+): Promise<ChunkResponse> {
+  // 后端读的是 neighbors；旧代码传 window 被忽略，导致"展开上下文"点了没反应
+  const params = new URLSearchParams({ agent_id: agentId, neighbors: String(neighbors) });
   const res = await fetch(`/api/chunks/${encodeURIComponent(chunkId)}?${params}`);
   if (!res.ok) {
     throw await ApiError.from(res);
   }
   return (await res.json()) as ChunkResponse;
+}
+
+export async function getDocContent(docId: string, agentId: string): Promise<DocContent> {
+  const params = new URLSearchParams({ agent_id: agentId });
+  const res = await fetch(`/api/docs/${encodeURIComponent(docId)}/content?${params}`);
+  if (!res.ok) {
+    throw await ApiError.from(res);
+  }
+  return (await res.json()) as DocContent;
 }
 
 export async function sendFeedback(req: FeedbackRequest): Promise<void> {
