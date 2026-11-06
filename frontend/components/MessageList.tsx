@@ -2,6 +2,8 @@
 
 import AgentTrace from "@/components/AgentTrace";
 import AnswerView from "@/components/AnswerView";
+import { TrustSummary } from "@/components/workspace/TrustSummary";
+import { CitationFocusProvider } from "@/lib/citationFocus";
 import SourceCards from "@/components/SourceCards";
 import type { ChatMessage } from "@/lib/chat";
 
@@ -9,56 +11,6 @@ type Props = {
   messages: ChatMessage[];
   onJumpToSource: (messageId: string, index: number) => void;
 };
-
-function ratioColor(ratio: number): string {
-  if (ratio >= 0.8) {
-    return "bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-200";
-  }
-  if (ratio >= 0.4) {
-    return "bg-general-bg text-general";
-  }
-  return "bg-muted text-muted-foreground";
-}
-
-function TrustBadge({ message }: { message: ChatMessage & { role: "assistant" } }) {
-  const hasSegments = (message.segments?.length ?? 0) > 0;
-  if (!hasSegments) {
-    return null;
-  }
-  const kb = message.segments?.filter((s) => s.kind === "kb").length ?? 0;
-  const total =
-    (message.segments?.filter((s) => s.kind === "kb").length ?? 0) +
-    (message.segments?.filter((s) => s.kind === "general").length ?? 0);
-  const warnCount = message.segments?.reduce((acc, s) => acc + s.warnings.length, 0) ?? 0;
-  const ratio = message.groundedRatio;
-
-  return (
-    <div className="mb-2 flex flex-wrap items-center gap-1.5 text-[11px]" data-testid="trust-badge">
-      <span
-        className={`rounded-full px-2 py-0.5 ${
-          message.answerMode === "strict"
-            ? "bg-indigo-50 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-200"
-            : "bg-sky-50 text-sky-700 dark:bg-sky-900/30 dark:text-sky-200"
-        }`}
-      >
-        {message.answerMode === "strict" ? "严格模式" : "参考模式"}
-      </span>
-      {ratio !== null && ratio !== undefined && (
-        <span className={`rounded-full px-2 py-0.5 ${ratioColor(ratio)}`} data-testid="kb-ratio">
-          知识库依据 {Math.round(ratio * 100)}%（{kb}/{total} 句）
-        </span>
-      )}
-      {warnCount > 0 && (
-        <span className="rounded-full bg-destructive/10 px-2 py-0.5 text-destructive" data-testid="numeric-warning">
-          ⚠ {warnCount} 处数字未在出处中找到
-        </span>
-      )}
-      <span className="text-muted-foreground">
-        琥珀底=一般知识，红波浪=数字存疑
-      </span>
-    </div>
-  );
-}
 
 export default function MessageList({ messages, onJumpToSource }: Props) {
   if (messages.length === 0) {
@@ -92,8 +44,8 @@ export default function MessageList({ messages, onJumpToSource }: Props) {
         const hasSegments = (message.segments?.length ?? 0) > 0;
 
         return (
+          <CitationFocusProvider key={message.id}>
           <article
-            key={message.id}
             id={message.id}
             data-testid={`assistant-${message.id}`}
             className="message-enter rounded-2xl rounded-tl-md border border-border bg-card p-3.5 shadow-sm"
@@ -108,7 +60,7 @@ export default function MessageList({ messages, onJumpToSource }: Props) {
             )}
 
             {hasSegments ? (
-              <TrustBadge message={message} />
+              <TrustSummary message={message} />
             ) : (
               message.groundedRatio === 0 &&
               message.answer && (
@@ -146,6 +98,7 @@ export default function MessageList({ messages, onJumpToSource }: Props) {
                 segments={message.segments}
                 onJump={(index) => onJumpToSource(message.id, index)}
                 messageId={message.id}
+                sources={message.sources}
               />
             ) : (
               !message.error &&
@@ -164,6 +117,7 @@ export default function MessageList({ messages, onJumpToSource }: Props) {
 
             {!!message.sources?.length && <SourceCards sources={message.sources} />}
           </article>
+          </CitationFocusProvider>
         );
       })}
       </div>
