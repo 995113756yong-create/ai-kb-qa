@@ -3,12 +3,14 @@
 import { useState } from "react";
 
 import type { Source } from "@/lib/types";
+import { useI18n } from "@/lib/i18n";
 
 type Props = {
   sources: Source[];
 };
 
 export default function SourceCards({ sources }: Props) {
+  const { t } = useI18n();
   const [open, setOpen] = useState(true);
 
   if (sources.length === 0) {
@@ -24,7 +26,7 @@ export default function SourceCards({ sources }: Props) {
         className="inline-flex items-center gap-1 text-xs font-medium text-indigo-600 transition-colors hover:text-indigo-700 dark:text-indigo-400 dark:hover:text-indigo-300"
       >
         <span aria-hidden>📎</span>
-        出处（{sources.length}）{open ? "收起" : "展开"}
+        {t("chat.sources")}（{sources.length}）{open ? t("trace.collapse") : t("trace.expand")}
       </button>
 
       {open && (

@@ -33,10 +33,15 @@ type I18nValue = {
   ready: boolean;
 };
 
+// 默认值必须与 Provider 行为一致（含占位符替换），
+// 否则在没有 Provider 的测试/孤立渲染场景下会显示 "证据 {n} / {total}"。
+const defaultT = (key: MessageKey, vars?: Record<string, string | number>) =>
+  interpolate(resolve(messages[DEFAULT_LOCALE], key), vars);
+
 const I18nContext = createContext<I18nValue>({
   locale: DEFAULT_LOCALE,
   setLocale: () => {},
-  t: (key) => resolve(messages[DEFAULT_LOCALE], key),
+  t: defaultT,
   ready: false,
 });
 

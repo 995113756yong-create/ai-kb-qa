@@ -10,6 +10,7 @@ import { toast } from "sonner";
 import { sendFeedback } from "@/lib/api";
 import type { Source } from "@/lib/types";
 import { cn } from "@/lib/utils";
+import { useI18n } from "@/lib/i18n";
 
 export type MessageActionsProps = {
   answer: string;
@@ -31,6 +32,7 @@ export function MessageActions({
   sources,
   className,
 }: MessageActionsProps) {
+  const { t } = useI18n();
   const [copied, setCopied] = useState(false);
   const [copiedWithSources, setCopiedWithSources] = useState(false);
   const [rating, setRating] = useState<"up" | "down" | null>(null);
@@ -41,7 +43,7 @@ export function MessageActions({
       setCopied(true);
       window.setTimeout(() => setCopied(false), 1500);
     } catch {
-      toast.error("复制失败");
+      toast.error(t("chat.copyFailed"));
     }
   };
 
@@ -55,9 +57,9 @@ export function MessageActions({
       .trim();
     const lines = (sources ?? []).map(
       (s) =>
-        `[${s.index}] ${s.source ?? "未知文档"}${s.page !== null && s.page !== undefined ? ` 第 ${s.page} 页` : ""}`,
+        `[${s.index}] ${s.source ?? t("common.unknownDoc")}${s.page !== null && s.page !== undefined ? ` ${t("common.page", { n: s.page })}` : ""}`,
     );
-    const text = lines.length ? `${body}\n\n出处：\n${lines.join("\n")}` : body;
+    const text = lines.length ? `${body}\n\n${t("chat.sources")}：\n${lines.join("\n")}` : body;
     try {
       await navigator.clipboard.writeText(text);
       setCopiedWithSources(true);
@@ -80,9 +82,9 @@ export function MessageActions({
         grounded_ratio: groundedRatio ?? null,
       });
       setRating(final);
-      if (final) toast.success(final === "up" ? "已记录：有帮助" : "已记录：没帮助");
+      if (final) toast.success(final === "up" ? t("chat.feedbackUp") : t("chat.feedbackDown"));
     } catch {
-      toast.error("反馈提交失败");
+      toast.error(t("chat.feedbackFailed"));
     }
   };
 
@@ -94,7 +96,7 @@ export function MessageActions({
         onClick={() => void onCopy()}
         className="rounded-md px-2 py-1 transition-colors hover:bg-muted hover:text-foreground"
       >
-        {copied ? "已复制" : "复制"}
+        {copied ? t("common.copied") : t("common.copy")}
       </button>
       <span className="text-border">|</span>
       <button
@@ -103,7 +105,7 @@ export function MessageActions({
         onClick={() => void onCopyWithSources()}
         className="rounded-md px-2 py-1 transition-colors hover:bg-muted hover:text-foreground"
       >
-        {copiedWithSources ? "已复制" : "复制（带出处）"}
+        {copiedWithSources ? t("common.copied") : t("chat.copyWithSources")}
       </button>
       <span className="text-border">|</span>
       <button
@@ -112,7 +114,7 @@ export function MessageActions({
         onClick={() => void onFeedback("up")}
         className={cn("rounded-md px-2 py-1 transition-colors hover:bg-muted hover:text-foreground", rating === "up" && "text-primary")}
       >
-        👍 有帮助
+        👍 {t("chat.feedbackUp")}
       </button>
       <button
         type="button"
@@ -120,7 +122,7 @@ export function MessageActions({
         onClick={() => void onFeedback("down")}
         className={cn("rounded-md px-2 py-1 transition-colors hover:bg-muted hover:text-foreground", rating === "down" && "text-primary")}
       >
-        👎 没帮助
+        👎 {t("chat.feedbackDown")}
       </button>
     </div>
   );

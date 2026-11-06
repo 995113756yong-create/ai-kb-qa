@@ -14,6 +14,7 @@ import { sourceByCitation } from "@/lib/citations";
 import { splitByRanges, type Range } from "@/lib/highlight";
 import type { Segment } from "@/lib/types";
 import { cn } from "@/lib/utils";
+import { useI18n } from "@/lib/i18n";
 
 export type EvidenceReaderProps = {
   message: ChatMessage & { role: "assistant" };
@@ -47,6 +48,7 @@ export function EvidenceReader({
   onFocusSentence,
   className,
 }: EvidenceReaderProps) {
+  const { t } = useI18n();
   const sources = useMemo(() => message.sources ?? [], [message.sources]);
   const total = sources.length;
   const source = sourceByCitation(sources, n);
@@ -118,7 +120,7 @@ export function EvidenceReader({
   if (!source) {
     return (
       <aside className={cn("flex items-center justify-center p-6 text-sm text-muted-foreground", className)}>
-        该引用没有对应的证据
+        {t("evidence.noSource")}
       </aside>
     );
   }
@@ -129,7 +131,7 @@ export function EvidenceReader({
   return (
     <aside
       role="complementary"
-      aria-label="证据原文"
+      aria-label={t("evidence.title")}
       data-testid="evidence-reader"
       className={cn("flex h-full min-h-0 flex-col bg-card", className)}
     >
@@ -138,11 +140,11 @@ export function EvidenceReader({
         <div className="flex items-center gap-1.5 text-sm">
           <FileText className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
           <span className="truncate font-medium" title={source.source ?? undefined}>
-            {source.source ?? "未知文档"}
+            {source.source ?? t("common.unknownDoc")}
           </span>
           {source.page !== null && source.page !== undefined ? (
             <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
-              第 {source.page} 页
+              {t("common.page", { n: source.page })}
             </span>
           ) : null}
         </div>
@@ -152,19 +154,19 @@ export function EvidenceReader({
               type="button"
               onClick={() => onSelect(Math.max(1, n - 1))}
               disabled={n <= 1}
-              aria-label="上一条证据"
+              aria-label={t("evidence.prev")}
               className="rounded p-0.5 hover:bg-muted disabled:opacity-30"
             >
               <ChevronLeft className="h-3.5 w-3.5" />
             </button>
             <span data-testid="reader-counter">
-              证据 {n} / {total}
+              {t("evidence.counter", { n, total })}
             </span>
             <button
               type="button"
               onClick={() => onSelect(Math.min(total, n + 1))}
               disabled={n >= total}
-              aria-label="下一条证据"
+              aria-label={t("evidence.next")}
               className="rounded p-0.5 hover:bg-muted disabled:opacity-30"
             >
               <ChevronRight className="h-3.5 w-3.5" />
@@ -173,7 +175,7 @@ export function EvidenceReader({
           <button
             type="button"
             onClick={onClose}
-            aria-label="关闭证据阅读器"
+            aria-label={t("evidence.close")}
             className="rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
           >
             <X className="h-3.5 w-3.5" />
@@ -193,20 +195,20 @@ export function EvidenceReader({
               onClick={retry}
               className="rounded border border-border px-2 py-1 hover:bg-muted"
             >
-              重试
+              {t("common.retry")}
             </button>
           </div>
         ) : null}
 
         {!loading && !error && data?.precise === false ? (
           <p className="mb-2 rounded bg-info-bg px-2 py-1.5 text-[11px] text-muted-foreground">
-            该文档为旧版本上传，仅能按片段定位；重新上传可精确定位到原文位置
+            {t("evidence.legacyNotice")}
           </p>
         ) : null}
 
         {!loading && !error && data?.truncated && !activeChunk ? (
           <p className="mb-2 rounded bg-info-bg px-2 py-1.5 text-[11px] text-muted-foreground">
-            文档过长，仅展示前部分内容
+            {t("evidence.truncatedNotice")}
           </p>
         ) : null}
 
@@ -250,7 +252,7 @@ export function EvidenceReader({
       {citedSegments.length > 0 && onFocusSentence ? (
         <section className="shrink-0 border-t border-border/60 px-3 py-2">
           <p className="mb-1 text-[11px] font-medium text-muted-foreground">
-            被引用于（{citedSegments.length}）
+            {t("evidence.citedIn", { n: citedSegments.length })}
           </p>
           <ul className="flex max-h-32 flex-col gap-1 overflow-y-auto">
             {citedSegments.map(({ index, seg }) => (
