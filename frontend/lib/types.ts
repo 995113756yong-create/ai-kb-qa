@@ -190,6 +190,28 @@ export type AgentEvent =
 
 export type AgentEventType = AgentEvent["type"];
 
+/** 文档原文里的一个片段：偏移以 pages[page_index].text 为基准 */
+export type DocContentChunk = {
+  chunk_id: string;
+  chunk_index: number;
+  page: number | null;
+  /** 该片段所在页在 pages 数组里的下标 */
+  page_index: number;
+  start: number;
+  end: number;
+};
+
+export type DocContent = {
+  status: "ok";
+  doc_id: string;
+  filename: string;
+  /** 原文文件存在且全部片段有偏移；false 表示旧文档，走降级 */
+  precise: boolean;
+  truncated: boolean;
+  pages: { page: number | null; text: string }[];
+  chunks: DocContentChunk[];
+};
+
 /** 多轮历史的一轮。只用于把追问改写成独立问题，不进入研究与回答。 */
 export type HistoryTurn = { role: "user" | "assistant"; content: string };
 

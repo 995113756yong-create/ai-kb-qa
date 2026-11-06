@@ -11,7 +11,7 @@ import CommandPalette from "@/components/CommandPalette";
 import MessageList from "@/components/MessageList";
 import AppSidebar from "@/components/workspace/AppSidebar";
 import { AdminTokenDialog } from "@/components/workspace/AdminTokenDialog";
-import { EvidencePanel } from "@/components/workspace/EvidencePanel";
+import { EvidenceReader } from "@/components/workspace/EvidenceReader";
 import { toast } from "sonner";
 
 import type { AskResponse, AgentInfo, AgentCreateRequest } from "@/lib/types";
@@ -287,6 +287,16 @@ export default function ChatApp({ initialAgentId, initialConversationId }: Props
     [cancel, syncAddress],
   );
 
+  // 阅读器「被引用于」点句子：滚到该句并闪烁
+  const focusSentence = useCallback((messageId: string, segmentIndex: number) => {
+    const el = document.getElementById(`${messageId}-seg-${segmentIndex}`);
+    if (!el) return;
+    el.scrollIntoView({ block: "center", behavior: "smooth" });
+    el.classList.remove("sentence-flash");
+    void el.offsetWidth;
+    el.classList.add("sentence-flash");
+  }, []);
+
   const jumpToSource = useCallback((messageId: string, n: number) => {
     setEvidence({ messageId, n });
   }, []);
@@ -407,9 +417,11 @@ export default function ChatApp({ initialAgentId, initialConversationId }: Props
             if (!evidenceMessage) return null;
             return (
               <aside className="hidden w-96 shrink-0 overflow-y-auto border-l border-border/60 lg:block">
-                <EvidencePanel
+                <EvidenceReader
                   message={evidenceMessage}
                   n={evidence.n}
+                  onSelect={(next) => setEvidence({ messageId: evidence.messageId, n: next })}
+                  onFocusSentence={(i) => focusSentence(evidence.messageId, i)}
                   agentId={activeAgentId}
                   onClose={() => setEvidence(null)}
                 />

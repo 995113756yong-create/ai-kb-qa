@@ -145,6 +145,7 @@ export default function MessageList({ messages, onJumpToSource }: Props) {
                 text={message.answer}
                 segments={message.segments}
                 onJump={(index) => onJumpToSource(message.id, index)}
+                messageId={message.id}
               />
             ) : (
               !message.error &&

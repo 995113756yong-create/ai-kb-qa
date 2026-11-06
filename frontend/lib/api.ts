@@ -7,6 +7,7 @@ import type {
   FeedbackRequest,
   AskResponse,
   DeleteResponse,
+  DocContent,
   HistoryTurn,
   DocListResponse,
   UploadResponse,
@@ -250,6 +251,15 @@ export async function getChunk(
     throw await ApiError.from(res);
   }
   return (await res.json()) as ChunkResponse;
+}
+
+export async function getDocContent(docId: string, agentId: string): Promise<DocContent> {
+  const params = new URLSearchParams({ agent_id: agentId });
+  const res = await fetch(`/api/docs/${encodeURIComponent(docId)}/content?${params}`);
+  if (!res.ok) {
+    throw await ApiError.from(res);
+  }
+  return (await res.json()) as DocContent;
 }
 
 export async function sendFeedback(req: FeedbackRequest): Promise<void> {

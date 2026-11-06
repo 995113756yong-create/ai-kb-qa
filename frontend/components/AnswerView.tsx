@@ -7,6 +7,8 @@ import type { Segment as TraceSegment } from "@/lib/types";
 type Props = {
   text: string;
   onJump?: (index: number) => void;
+  /** 消息 id：给句子加 id/data-cites，供阅读器「被引用于」定位（M5.2） */
+  messageId?: string;
   /** 句子级溯源数据：有值时按句渲染并标注来源底色 */
   segments?: TraceSegment[] | null;
 };
@@ -39,9 +41,13 @@ function splitSegments(text: string): Segment[] {
 function SegmentBody({
   segment,
   onJump,
+  messageId,
+  index,
 }: {
   segment: TraceSegment;
   onJump?: (index: number) => void;
+  messageId?: string;
+  index?: number;
 }) {
   // 每段内部仍复用引用渲染逻辑，编号照常可点击
   const hasWarning = segment.warnings.length > 0;
@@ -57,14 +63,22 @@ function SegmentBody({
       ? "一般知识，非知识库内容"
       : undefined;
 
+  const cites = (segment.citations ?? []).join(",");
   return (
-    <span data-kind={segment.kind} data-warn={hasWarning ? "true" : undefined} className={style} title={title}>
+    <span
+      data-kind={segment.kind}
+      data-warn={hasWarning ? "true" : undefined}
+      data-cites={cites || undefined}
+      id={messageId && index !== undefined ? `${messageId}-seg-${index}` : undefined}
+      className={style}
+      title={title}
+    >
       <AnswerView text={segment.text} onJump={onJump} />
     </span>
   );
 }
 
-export default function AnswerView({ text, onJump, segments }: Props) {
+export default function AnswerView({ text, onJump, segments, messageId }: Props) {
   function handleClick(event: MouseEvent<HTMLButtonElement>, index: number) {
     event.preventDefault();
     onJump?.(index);
@@ -74,7 +88,7 @@ export default function AnswerView({ text, onJump, segments }: Props) {
     return (
       <div className="whitespace-pre-wrap text-[13.5px] leading-7 text-foreground">
         {segments.map((segment, i) => (
-          <SegmentBody key={i} segment={segment} onJump={onJump} />
+          <SegmentBody key={i} segment={segment} onJump={onJump} messageId={messageId} index={i} />
         ))}
       </div>
     );
@@ -90,8 +104,8 @@ export default function AnswerView({ text, onJump, segments }: Props) {
             key={i}
             type="button"
             onClick={(event) => handleClick(event, segment.index)}
-            className="mx-0.5 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-indigo-100 px-1 text-[10px] font-semibold text-indigo-700 transition-colors hover:bg-indigo-200 dark:bg-indigo-500/20 dark:text-indigo-300 dark:hover:bg-indigo-500/30"
-            aria-label={`查看出处 ${segment.index}`}
+            className="mx-0.5 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-primary/10 px-1 text-[10px] font-semibold text-primary transition-colors hover:bg-primary/20"
+            aria-label={`查看证据 ${segment.index}`}
           >
             {segment.index}
           </button>
