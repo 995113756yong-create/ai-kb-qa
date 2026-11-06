@@ -23,6 +23,28 @@
   --input: #e4e4e7;
   --ring: #6366f1;
   --radius: 0.75rem;
+
+  /* 语义色：证据与可信度 */
+  --evidence-active: oklch(0.93 0.07 280); /* 当前证据高亮（品牌靛蓝的浅色） */
+  --evidence-active-border: oklch(0.62 0.17 275);
+  --evidence-other: oklch(0.96 0.03 280); /* 同一回答的其他证据 */
+  --kb: oklch(0.62 0.13 160); /* 知识库依据（绿） */
+  --general: oklch(0.8 0.12 80); /* 一般知识（琥珀） */
+  --general-bg: oklch(0.97 0.04 85);
+  --warn: oklch(0.6 0.2 25); /* 数字待核对（红） */
+  --info-bg: oklch(0.97 0.02 250);
+
+  /* 层级 */
+  --shadow-sm: 0 1px 2px rgb(0 0 0 / 0.04), 0 1px 1px rgb(0 0 0 / 0.03);
+  --shadow-md: 0 4px 12px rgb(0 0 0 / 0.06), 0 1px 3px rgb(0 0 0 / 0.04);
+  --shadow-lg: 0 12px 32px rgb(0 0 0 / 0.1), 0 2px 6px rgb(0 0 0 / 0.04);
+
+  /* 动效 */
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --dur-fast: 120ms; /* hover、按下 */
+  --dur-base: 200ms; /* 浮层、面板 */
+  --dur-slow: 320ms; /* 抽屉、页面级 */
 }
 
 .dark {
@@ -45,6 +67,18 @@
   --border: #27272a;
   --input: #27272a;
   --ring: #6366f1;
+
+  --evidence-active: oklch(0.36 0.09 280);
+  --evidence-active-border: oklch(0.72 0.14 275);
+  --evidence-other: oklch(0.28 0.05 280);
+  --kb: oklch(0.72 0.13 160);
+  --general: oklch(0.8 0.12 80);
+  --general-bg: oklch(0.3 0.06 80);
+  --warn: oklch(0.7 0.18 25);
+  --info-bg: oklch(0.27 0.03 250);
+  --shadow-sm: 0 1px 2px rgb(0 0 0 / 0.4);
+  --shadow-md: 0 4px 12px rgb(0 0 0 / 0.45);
+  --shadow-lg: 0 12px 32px rgb(0 0 0 / 0.55);
 }
 
 @theme inline {
@@ -71,6 +105,23 @@
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) + 4px);
+
+  /* 语义色注册为 Tailwind 类名：bg-evidence-active / text-kb 等 */
+  --color-evidence-active: var(--evidence-active);
+  --color-evidence-active-border: var(--evidence-active-border);
+  --color-evidence-other: var(--evidence-other);
+  --color-kb: var(--kb);
+  --color-general: var(--general);
+  --color-general-bg: var(--general-bg);
+  --color-warn: var(--warn);
+  --color-info-bg: var(--info-bg);
+
+  /* 阴影与动效 */
+  --shadow-token-sm: var(--shadow-sm);
+  --shadow-token-md: var(--shadow-md);
+  --shadow-token-lg: var(--shadow-lg);
+  --ease-out-soft: var(--ease-out);
+  --ease-in-out-soft: var(--ease-in-out);
 }
 
 @layer base {
@@ -230,6 +281,55 @@
 
 @media (prefers-reduced-motion: reduce) {
   .animate-fade-in-up {
+    animation: none;
+  }
+}
+
+/* ---------- 证据高亮 ---------- */
+mark[data-active] {
+  background-color: var(--evidence-active);
+  color: inherit;
+  border-bottom: 2px solid var(--evidence-active-border);
+  border-radius: 2px;
+  padding: 0 1px;
+}
+
+mark[data-other] {
+  background-color: var(--evidence-other);
+  color: inherit;
+  border-radius: 2px;
+  padding: 0 1px;
+}
+
+@keyframes evidence-breathe {
+  0%, 100% { background-color: var(--evidence-active); }
+  50% { background-color: color-mix(in srgb, var(--evidence-active) 60%, transparent); }
+}
+
+.evidence-breathe {
+  animation: evidence-breathe 600ms var(--ease-in-out) 1;
+}
+
+@keyframes sentence-flash {
+  from { background-color: var(--evidence-active); }
+  to { background-color: transparent; }
+}
+
+.sentence-flash {
+  animation: sentence-flash 900ms var(--ease-out) 1;
+}
+
+/* 引用编号被悬停时，联动句子加下划线 */
+[data-linked] {
+  background-color: var(--evidence-other);
+  text-decoration: underline;
+  text-decoration-color: var(--evidence-active-border);
+  text-underline-offset: 3px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .evidence-breathe,
+  .sentence-flash {
     animation: none;
   }
 }

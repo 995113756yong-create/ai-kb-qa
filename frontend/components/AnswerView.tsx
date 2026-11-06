@@ -47,9 +47,9 @@ function SegmentBody({
   const hasWarning = segment.warnings.length > 0;
   const isGeneral = segment.kind === "general";
   const style = hasWarning
-    ? "underline decoration-wavy decoration-red-500 decoration-2 underline-offset-4"
+    ? "underline decoration-wavy decoration-warn decoration-2 underline-offset-4"
     : isGeneral
-      ? "bg-amber-100/70 underline decoration-dotted decoration-amber-500 decoration-1 underline-offset-4 dark:bg-amber-500/15"
+      ? "bg-general-bg underline decoration-dotted decoration-general decoration-1 underline-offset-4"
       : "";
   const title = hasWarning
     ? segment.warnings.join("\n")
@@ -72,7 +72,7 @@ export default function AnswerView({ text, onJump, segments }: Props) {
 
   if (segments && segments.length > 0) {
     return (
-      <div className="whitespace-pre-wrap text-[13.5px] leading-7 text-zinc-800 dark:text-zinc-100">
+      <div className="whitespace-pre-wrap text-[13.5px] leading-7 text-foreground">
         {segments.map((segment, i) => (
           <SegmentBody key={i} segment={segment} onJump={onJump} />
         ))}
@@ -81,7 +81,7 @@ export default function AnswerView({ text, onJump, segments }: Props) {
   }
 
   return (
-    <div className="whitespace-pre-wrap text-[13.5px] leading-7 text-zinc-800 dark:text-zinc-100">
+    <div className="whitespace-pre-wrap text-[13.5px] leading-7 text-foreground">
       {splitSegments(text).map((segment, i) =>
         segment.kind === "text" ? (
           <span key={i}>{segment.text}</span>

@@ -15,9 +15,9 @@ function ratioColor(ratio: number): string {
     return "bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-200";
   }
   if (ratio >= 0.4) {
-    return "bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-200";
+    return "bg-general-bg text-general";
   }
-  return "bg-zinc-100 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400";
+  return "bg-muted text-muted-foreground";
 }
 
 function TrustBadge({ message }: { message: ChatMessage & { role: "assistant" } }) {
@@ -49,11 +49,11 @@ function TrustBadge({ message }: { message: ChatMessage & { role: "assistant" } 
         </span>
       )}
       {warnCount > 0 && (
-        <span className="rounded-full bg-red-50 px-2 py-0.5 text-red-600 dark:bg-red-900/30 dark:text-red-300" data-testid="numeric-warning">
+        <span className="rounded-full bg-destructive/10 px-2 py-0.5 text-destructive" data-testid="numeric-warning">
           ⚠ {warnCount} 处数字未在出处中找到
         </span>
       )}
-      <span className="text-zinc-400">
+      <span className="text-muted-foreground">
         琥珀底=一般知识，红波浪=数字存疑
       </span>
     </div>
@@ -96,7 +96,7 @@ export default function MessageList({ messages, onJumpToSource }: Props) {
             key={message.id}
             id={message.id}
             data-testid={`assistant-${message.id}`}
-            className="message-enter rounded-2xl rounded-tl-md border border-zinc-200/80 bg-white p-3.5 shadow-sm dark:border-zinc-800/80 dark:bg-zinc-900"
+            className="message-enter rounded-2xl rounded-tl-md border border-border bg-card p-3.5 shadow-sm"
           >
             {message.mode === "agent" && (
               <AgentTrace
@@ -115,7 +115,7 @@ export default function MessageList({ messages, onJumpToSource }: Props) {
                 <p
                   role="status"
                   data-testid="ungrounded-warning"
-                  className="mb-2 flex items-center gap-1.5 rounded-lg bg-amber-50 px-2.5 py-1.5 text-xs text-amber-800 dark:bg-amber-900/30 dark:text-amber-200"
+                  className="mb-2 flex items-center gap-1.5 rounded-lg bg-general-bg px-2.5 py-1.5 text-xs text-general"
                 >
                   <span aria-hidden>⚠️</span>
                   该回答未引用文档内容，请谨慎参考
@@ -127,14 +127,14 @@ export default function MessageList({ messages, onJumpToSource }: Props) {
               <p
                 role="status"
                 data-testid="stopped-hint"
-                className="mb-2 rounded-lg bg-zinc-100 px-2.5 py-1.5 text-xs text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400"
+                className="mb-2 rounded-lg bg-muted px-2.5 py-1.5 text-xs text-muted-foreground"
               >
                 已停止生成
               </p>
             )}
 
             {message.error && (
-              <p role="alert" className="flex items-center gap-1.5 rounded-lg bg-red-50 px-2.5 py-1.5 text-xs text-red-600 dark:bg-red-900/20 dark:text-red-300">
+              <p role="alert" className="flex items-center gap-1.5 rounded-lg bg-destructive/10 px-2.5 py-1.5 text-xs text-destructive">
                 <span aria-hidden>⚠️</span>
                 {message.error}
               </p>
@@ -150,12 +150,12 @@ export default function MessageList({ messages, onJumpToSource }: Props) {
               !message.error &&
               !message.stopped &&
               isThinking && (
-                <div className="flex items-center gap-1 py-1 text-xs text-zinc-400">
+                <div className="flex items-center gap-1 py-1 text-xs text-muted-foreground">
                   <span>思考中</span>
                   <span className="flex gap-0.5">
-                    <span className="thinking-dot h-1 w-1 rounded-full bg-zinc-400" style={{ animationDelay: "0ms" }} />
-                    <span className="thinking-dot h-1 w-1 rounded-full bg-zinc-400" style={{ animationDelay: "150ms" }} />
-                    <span className="thinking-dot h-1 w-1 rounded-full bg-zinc-400" style={{ animationDelay: "300ms" }} />
+                    <span className="thinking-dot h-1 w-1 rounded-full bg-muted-foreground" style={{ animationDelay: "0ms" }} />
+                    <span className="thinking-dot h-1 w-1 rounded-full bg-muted-foreground" style={{ animationDelay: "150ms" }} />
+                    <span className="thinking-dot h-1 w-1 rounded-full bg-muted-foreground" style={{ animationDelay: "300ms" }} />
                   </span>
                 </div>
               )
