@@ -65,12 +65,17 @@ export type SearchHit = {
 };
 
 /** B6：GET /api/chunks/{chunk_id} 响应 */
-export type ChunkResponse = {
-  status: "ok";
+/** 片段详情。字段与后端 GET /api/chunks/{chunk_id} 的实际响应一致。 */
+export type ChunkDetail = {
   chunk_id: string;
-  text: string;
-  neighbors?: { before: string[]; after: string[] };
+  doc_id: string | null;
+  source: string | null;
+  page: number | null;
+  content: string;
+  neighbors?: Omit<ChunkDetail, "neighbors">[];
 };
+
+export type ChunkResponse = { status: "ok"; chunk: ChunkDetail };
 
 /** POST /api/feedback 请求体 */
 export type FeedbackRequest = {

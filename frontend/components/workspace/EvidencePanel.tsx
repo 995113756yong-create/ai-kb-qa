@@ -8,20 +8,22 @@ import { useEffect, useState } from "react";
 import { getChunk } from "@/lib/api";
 import type { ChatMessage } from "@/lib/chat";
 import { cn } from "@/lib/utils";
+import { sourceByCitation } from "@/lib/citations";
 
 export type EvidencePanelProps = {
   message: ChatMessage & { role: "assistant" };
-  /** 当前选中的证据编号（sources 数组下标），null 表示未选 */
-  index: number | null;
+  /** 当前选中的引用编号 n（从 1 开始，对应正文里的 [n]），null 表示未选 */
+  n: number | null;
   /** 当前专家 ID，展开上下文查 chunk 用 */
   agentId: string;
   onClose: () => void;
   className?: string;
 };
 
-export function EvidencePanel({ message, index, agentId, onClose, className }: EvidencePanelProps) {
+export function EvidencePanel({ message, n, agentId, onClose, className }: EvidencePanelProps) {
   const sources = message.sources ?? [];
-  const source = index !== null ? sources[index] : null;
+  // 必须按编号查找，不能用数组下标：两者差 1，只有一条证据时会取到 undefined
+  const source = n !== null ? sourceByCitation(sources, n) : null;
 
   const [chunkText, setChunkText] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -29,9 +31,9 @@ export function EvidencePanel({ message, index, agentId, onClose, className }: E
 
   // 切换引用条目时清空上一次的正文。用「上一次的 index」判断是否真的换了条目，
   // 避免 effect 里无条件 setState（react-hooks/set-state-in-effect）。
-  const [prevIndex, setPrevIndex] = useState(index);
-  if (index !== prevIndex) {
-    setPrevIndex(index);
+  const [prevIndex, setPrevIndex] = useState(n);
+  if (n !== prevIndex) {
+    setPrevIndex(n);
     setChunkText(null);
     setError(null);
   }
@@ -45,7 +47,7 @@ export function EvidencePanel({ message, index, agentId, onClose, className }: E
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
 
-  if (index === null || !source) {
+  if (n === null || !source) {
     return (
       <div className={cn("flex items-center justify-center rounded-xl border border-dashed p-6 text-sm text-muted-foreground", className)}>
         点击回答中的引用编号查看证据原文
@@ -63,7 +65,7 @@ export function EvidencePanel({ message, index, agentId, onClose, className }: E
     setError(null);
     try {
       const res = await getChunk(source.chunk_id, agentId);
-      setChunkText(res.text);
+      setChunkText(res.chunk.content);
     } catch (e) {
       setError(e instanceof Error ? e.message : "加载失败");
     } finally {
@@ -78,7 +80,7 @@ export function EvidencePanel({ message, index, agentId, onClose, className }: E
     >
       <header className="flex items-center justify-between">
         <h3 className="text-sm font-medium">
-          证据 {source.index + 1}
+          证据 {source.index}
           {source.source ? <span className="ml-2 text-muted-foreground">{source.source}</span> : null}
         </h3>
         <button type="button" onClick={onClose} className="text-xs text-muted-foreground hover:text-foreground" aria-label="关闭证据面板">

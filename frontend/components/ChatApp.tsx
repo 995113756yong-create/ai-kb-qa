@@ -35,7 +35,8 @@ export default function ChatApp({ initialAgentId, initialConversationId }: Props
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [mode, setMode] = useState<"agent" | "fast">("agent");
   const [tokenOpen, setTokenOpen] = useState(false);
-  const [evidence, setEvidence] = useState<{ messageId: string; index: number } | null>(null);
+  // 用引用编号 n（从 1 开始），不用数组下标
+  const [evidence, setEvidence] = useState<{ messageId: string; n: number } | null>(null);
 
   const activeAgent = useMemo(
     () => agents.find((a) => a.agent_id === activeAgentId) ?? null,
@@ -268,8 +269,8 @@ export default function ChatApp({ initialAgentId, initialConversationId }: Props
     [cancel, syncAddress],
   );
 
-  const jumpToSource = useCallback((messageId: string, index: number) => {
-    setEvidence({ messageId, index });
+  const jumpToSource = useCallback((messageId: string, n: number) => {
+    setEvidence({ messageId, n });
   }, []);
 
   // ---------- 快捷键 ----------
@@ -378,7 +379,7 @@ export default function ChatApp({ initialAgentId, initialConversationId }: Props
               <aside className="hidden w-96 shrink-0 overflow-y-auto border-l border-border/60 lg:block">
                 <EvidencePanel
                   message={evidenceMessage}
-                  index={evidence.index}
+                  n={evidence.n}
                   agentId={activeAgentId}
                   onClose={() => setEvidence(null)}
                 />

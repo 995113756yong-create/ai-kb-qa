@@ -234,8 +234,13 @@ export async function streamAgent(
   parser.flush();
 }
 
-export async function getChunk(chunkId: string, agentId: string, window = 1): Promise<ChunkResponse> {
-  const params = new URLSearchParams({ agent_id: agentId, window: String(window) });
+export async function getChunk(
+  chunkId: string,
+  agentId: string,
+  neighbors = 1,
+): Promise<ChunkResponse> {
+  // 后端读的是 neighbors；旧代码传 window 被忽略，导致"展开上下文"点了没反应
+  const params = new URLSearchParams({ agent_id: agentId, neighbors: String(neighbors) });
   const res = await fetch(`/api/chunks/${encodeURIComponent(chunkId)}?${params}`);
   if (!res.ok) {
     throw await ApiError.from(res);
