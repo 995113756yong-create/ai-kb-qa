@@ -8,14 +8,6 @@
 VALID_MODES = ("strict", "reference")
 
 
-def with_persona(prompt: str, persona: str) -> str:
-    """persona 非空时在提示词末尾追加角色设定。研究/回答两阶段共用，保证拼接一致。"""
-    persona = (persona or "").strip()
-    if not persona:
-        return prompt
-    return prompt + "\n\n## 你的角色设定（回答风格与安全要求必须遵守）\n" + persona
-
-
 # ---------- 研究阶段 ----------
 
 RESEARCH_PROMPT_STRICT = """你是一个严谨的文档问答助手。你只能依据知识库里的文档回答，不能使用自己的常识补充事实。
@@ -89,3 +81,48 @@ NO_EVIDENCE_ANSWER_PROMPT = """你是一个专业助手。知识库中没有检�
 CHAT_PROMPT = """你是一个知识库问答助手。用户现在只是在打招呼、致谢或询问你的身份，
 不需要检索资料。用一两句简洁友好的中文回复；被问到能做什么时，说明你可以基于用户上传的文档回答问题，
 并会标注答案出处。不要编造任何具体的业务信息。"""
+
+# ---------- language dispatch ----------
+#
+# Chinese constants keep their original names (backwards compatible).
+# English versions live in prompts_en. runner.py uses get_prompt(lang).
+
+from app.agent import prompts_en as _en  # noqa: E402
+
+_PERSONA_HEADER_ZH = "\n\n## 你的角色设定（回答风格与安全要求必须遵守）\n"
+_PERSONA_HEADER_EN = "\n\n## Your role (answer style and safety requirements are mandatory)\n"
+
+
+def get_prompt(name: str, lang: str = "zh") -> str:
+    """Return the prompt for the given language.
+
+    name: research_strict / research_reference /
+          answer_strict / answer_reference / answer_no_evidence / chat
+    """
+    zh = {
+        "research_strict": RESEARCH_PROMPT_STRICT,
+        "research_reference": RESEARCH_PROMPT_REFERENCE,
+        "answer_strict": STRICT_ANSWER_PROMPT,
+        "answer_reference": REFERENCE_ANSWER_PROMPT,
+        "answer_no_evidence": NO_EVIDENCE_ANSWER_PROMPT,
+        "chat": CHAT_PROMPT,
+    }
+    en = {
+        "research_strict": _en.RESEARCH_PROMPT_STRICT,
+        "research_reference": _en.RESEARCH_PROMPT_REFERENCE,
+        "answer_strict": _en.STRICT_ANSWER_PROMPT,
+        "answer_reference": _en.REFERENCE_ANSWER_PROMPT,
+        "answer_no_evidence": _en.NO_EVIDENCE_ANSWER_PROMPT,
+        "chat": _en.CHAT_PROMPT,
+    }
+    table = en if lang == "en" else zh
+    return table.get(name, zh.get(name, ""))
+
+
+def with_persona(prompt: str, persona: str, lang: str = "zh") -> str:
+    """Append the persona block; header language follows lang."""
+    persona = (persona or "").strip()
+    if not persona:
+        return prompt
+    header = _PERSONA_HEADER_EN if lang == "en" else _PERSONA_HEADER_ZH
+    return prompt + header + persona

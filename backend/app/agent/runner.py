@@ -21,14 +21,23 @@ from app.agent.prompts import (
     STRICT_ANSWER_PROMPT,
     VALID_MODES,
     with_persona,
+    get_prompt,
 )
 from app.agent.query_rewrite import decompose_question, should_attempt_decompose
 from app.agent.intent import CHAT, KB_QUERY, LIST_DOCS, classify
 from app.qa import EMPTY_KB_ANSWER, NOT_FOUND_ANSWER
 from app.agent.tools import TOOL_SCHEMAS, execute_tool, summarize, to_text
-from app.i18n import tr
+from app.i18n import get_lang, tr
 
 logger = logging.getLogger(__name__)
+
+
+def _lang() -> str:
+    """回答语言：跟随当前请求语言（中间件按 Accept-Language 设置）。"""
+    try:
+        return get_lang() or "zh"
+    except Exception:
+        return "zh"
 
 LOG_FILE = "agent_runs.jsonl"
 MAX_CONSECUTIVE_ERRORS = 3
@@ -154,7 +163,7 @@ def safe_parse(raw_arguments: str) -> dict:
 
 def _answer_messages_no_evidence(question: str, mode: str = "reference", persona: str = "") -> List[dict]:
     """知识库无可用证据时的回答消息: reference 模式让模型用自己的知识回答并声明来源."""
-    prompt = with_persona(NO_EVIDENCE_ANSWER_PROMPT, persona)
+    prompt = with_persona(get_prompt("answer_no_evidence", _lang()), persona, _lang())
     return [
         {"role": "system", "content": prompt},
         {"role": "user", "content": question},
@@ -228,7 +237,7 @@ def _answer_chat(
     history 只作为对话上下文插入，让“谢谢你刚才的解释”这类话能自然接上；
     闲聊不检索、不引用，不影响证据边界。
     """
-    messages = [{"role": "system", "content": with_persona(CHAT_PROMPT, persona)}]
+    messages = [{"role": "system", "content": with_persona(get_prompt("chat", _lang()), persona, _lang())}]
     for turn in (history or [])[-config.CONTEXTUALIZE_MAX_TURNS * 2:]:
         role = turn.get("role")
         content = (turn.get("content") or "").strip()
@@ -296,9 +305,9 @@ def answer_messages(
     mode: str = "reference",
     persona: str = "",
 ) -> List[dict]:
-    base = STRICT_ANSWER_PROMPT if mode == "strict" else REFERENCE_ANSWER_PROMPT
+    base = get_prompt("answer_strict" if mode == "strict" else "answer_reference", _lang())
     return [
-        {"role": "system", "content": with_persona(base, persona)},
+        {"role": "system", "content": with_persona(base, persona, _lang())},
         {
             "role": "user",
             "content": f"证据：\n\n{registry.format_for_prompt()}\n\n问题：{question}",
@@ -357,9 +366,9 @@ def _run_agent_impl(
         MeteredLLM(rerank_llm, meter) if (enable_rerank and rerank_llm) else None
     )
 
-    base_research = RESEARCH_PROMPT_STRICT if answer_mode == "strict" else RESEARCH_PROMPT_REFERENCE
+    base_research = get_prompt("research_strict" if answer_mode == "strict" else "research_reference", _lang())
     messages = [
-        {"role": "system", "content": with_persona(base_research, persona)},
+        {"role": "system", "content": with_persona(base_research, persona, _lang())},
         {"role": "user", "content": question},
     ]
     seen_calls: set = set()

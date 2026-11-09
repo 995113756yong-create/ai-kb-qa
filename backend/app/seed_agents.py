@@ -11,6 +11,9 @@ import logging
 import os
 from typing import List, Optional
 
+from app import seed_agents_en
+from app.i18n import DEFAULT_LANG, get_lang
+
 logger = logging.getLogger(__name__)
 
 FITNESS_AGENT_ID = "fitness-coach"
@@ -198,29 +201,58 @@ FITNESS_CORPUS: List[tuple] = [
 ]
 
 
-def ensure_seed_agents(store) -> List[str]:
+def _seed_content(lang: str) -> dict:
+    """取指定语言的种子内容。
+
+    中文用本模块的常量，英文用 seed_agents_en。两种语言的事实性数字一致，
+    只是表达语言不同。
+    """
+    if lang == "en":
+        return {
+            "name": "Fitness Coach",
+            "description": (
+                "Muscle building, fat loss, strength training and running basics, "
+                "with foundational training and nutrition plans"
+            ),
+            "persona": seed_agents_en.FITNESS_PERSONA,
+            "greeting": seed_agents_en.GREETING,
+            "starters": seed_agents_en.STARTERS,
+            "corpus": seed_agents_en.CORPUS,
+        }
+    return {
+        "name": "健身教练",
+        "description": "增肌、减脂、力量训练与跑步入门，附训练和饮食的基础方案",
+        "persona": FITNESS_PERSONA,
+        "greeting": FITNESS_GREETING,
+        "starters": FITNESS_STARTERS,
+        "corpus": FITNESS_CORPUS,
+    }
+
+
+def ensure_seed_agents(store, lang: Optional[str] = None) -> List[str]:
     """播种内置专家（幂等：已存在则跳过）。返回本次新建的 agent_id 列表。
 
     在 create_app 的 lifespan 里调用：启动即有可用的健身专家，
     首次体验不再是空白界面。播种失败只打日志，不能阻塞服务启动。
     """
     created: List[str] = []
+    content = _seed_content(lang or get_lang() or DEFAULT_LANG)
     # 旧清单迁移：健身专家存在但缺 starter_questions 时补默认值（已有键不覆盖）
     existing = store.get(FITNESS_AGENT_ID)
     if existing and not existing.get("starter_questions"):
-        existing["starter_questions"] = list(FITNESS_STARTERS)
+        existing["starter_questions"] = list(content["starters"])
         store.save_agent(existing)
     try:
         if store.get(FITNESS_AGENT_ID) is None:
             store.create(
-                name="健身教练",
-                description="增肌、减脂、力量训练与跑步入门，附训练和饮食的基础方案",
-                persona=FITNESS_PERSONA,
-                greeting=FITNESS_GREETING,
+                name=content["name"],
+                description=content["description"],
+                persona=content["persona"],
+                greeting=content["greeting"],
                 emoji="💪",
                 agent_id=FITNESS_AGENT_ID,
                 answer_mode="reference",
-                starter_questions=FITNESS_STARTERS,
+                starter_questions=content["starters"],
             )
             created.append(FITNESS_AGENT_ID)
             logger.info("已播种内置专家：%s", FITNESS_AGENT_ID)
@@ -236,7 +268,7 @@ def ensure_seed_agents(store) -> List[str]:
         done_marker = os.path.join(store.upload_dir_of(FITNESS_AGENT_ID), ".seed_done")
         first_run = FITNESS_AGENT_ID in created and kb.is_empty
         if first_run and not os.path.exists(done_marker):
-            _seed_fitness_corpus(store, kb)
+            _seed_fitness_corpus(store, kb, content["corpus"])
             # 语料装载完成后再写标记：装载中途失败下次启动还会重试
             with open(done_marker, "w", encoding="utf-8") as f:
                 f.write("seeded")
@@ -245,14 +277,14 @@ def ensure_seed_agents(store) -> List[str]:
     return created
 
 
-def _seed_fitness_corpus(store, kb) -> None:
+def _seed_fitness_corpus(store, kb, corpus=None) -> None:
     from app.document import load_and_split_with_pages
 
     upload_dir = store.upload_dir_of(FITNESS_AGENT_ID)
     os.makedirs(upload_dir, exist_ok=True)
     import uuid
 
-    for filename, text in FITNESS_CORPUS:
+    for filename, text in (corpus or FITNESS_CORPUS):
         path = os.path.join(upload_dir, f"seed_{filename}")
         with open(path, "w", encoding="utf-8") as f:
             f.write(text)
