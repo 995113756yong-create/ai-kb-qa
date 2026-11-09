@@ -64,6 +64,9 @@ INTENT_ROUTING_ENABLED = os.getenv("INTENT_ROUTING_ENABLED", "true").lower() == 
 # default 专家不进来，沿用上面的 UPLOAD_DIR / FAISS_DIR / AGENT_LOG_DIR。
 AGENTS_DIR = os.getenv("AGENTS_DIR", os.path.join(BACKEND_DIR, "agents_store"))
 
+# * 内置专家播种语言（zh / en）。默认中文。
+SEED_LANG = os.getenv("SEED_LANG", "zh").strip().lower()
+
 AGENT_LOG_DIR = os.getenv("AGENT_LOG_DIR", os.path.join(BACKEND_DIR, "logs"))
 
 # ============ 可信回答与评测体系（feat/trust-and-eval） ============

@@ -520,6 +520,7 @@ def main() -> int:
     parser.add_argument("--mock", action="store_true", help="用假实现，不联网")
     parser.add_argument("--mode", choices=["strict", "reference", "both"], default="both")
     parser.add_argument("--agent", help="只跑指定专家的用例")
+    parser.add_argument("--cases", help="用例文件路径，默认 eval/cases.jsonl")
     parser.add_argument("--judge", action="store_true", help="开启 LLM-as-judge 忠实度评判")
     parser.add_argument("--admin-token", default="", help="重灌语料的管理员口令")
     parser.add_argument("--no-upload", action="store_true", help="跳过清空+上传语料")
@@ -533,7 +534,10 @@ def main() -> int:
         print("必须指定 --base 或 --mock")
         return 2
 
-    cases = load_cases(CASES_FILE)
+    cases_path = Path(args.cases) if args.cases else CASES_FILE
+    if not cases_path.is_absolute():
+        cases_path = Path(__file__).parent / cases_path
+    cases = load_cases(cases_path)
     if args.agent:
         cases = [c for c in cases if c.get("agent", "default") == args.agent]
     modes = (

@@ -160,7 +160,7 @@ def create_app(
             app.state.store = store
             if seed_builtin:
                 try:
-                    ensure_seed_agents(store)
+                    ensure_seed_agents(store, getattr(config, "SEED_LANG", None))
                 except Exception as e:  # 播种失败绝不阻塞启动
                     logger.warning("内置专家播种失败：%s", e)
         if not config.ADMIN_TOKEN:
