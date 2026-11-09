@@ -11,6 +11,7 @@ from typing import List, Optional
 from fastapi import Depends, FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
+from .i18n import normalize_lang, reset_lang, set_lang, tr
 from fastapi.responses import StreamingResponse
 from langchain_core.embeddings import Embeddings
 from langchain_core.language_models import BaseChatModel
@@ -49,7 +50,7 @@ def _append_feedback(path: str, line: str, max_bytes: int) -> None:
 
 READ_BLOCK = 1024 * 1024
 DOC_ID_RE = re.compile(r"^[0-9a-f]{32}$")
-MISSING_KEY_MSG = "服务未配置 OPENAI_API_KEY，暂时无法上传和问答"
+MISSING_KEY_MSG_KEY = "kb.missing_key"
 
 logger = logging.getLogger(__name__)
 
@@ -132,7 +133,7 @@ def create_app(
         app.state.store = None
         if embeddings is None and not config.OPENAI_API_KEY:
             # 不阻止启动：健康检查照常可用，上传/问答返回 503
-            logger.warning(MISSING_KEY_MSG)
+            logger.warning(tr(MISSING_KEY_MSG_KEY))
         else:
             emb = embeddings or get_embeddings()
             kb = KnowledgeBase(index_dir, emb)
@@ -173,6 +174,25 @@ def create_app(
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+    @app.middleware("http")
+    async def _i18n_middleware(request, call_next):
+        """按 Accept-Language 设定本次请求的响应语言。
+
+        只影响用户可见的错误文案，日志仍用中文。
+        用 ContextVar，并发请求之间不会串语言。
+        """
+        raw = request.headers.get("accept-language")
+        # 允许用查询参数强制指定，便于调试与前端固定语言
+        override = request.query_params.get("lang")
+        token = set_lang(normalize_lang(override or raw))
+        try:
+            return await call_next(request)
+        finally:
+            # 必须重置：ContextVar 在同一线程内跨请求保留，
+            # 不重置的话上一个英文请求会让后续中文请求也返回英文。
+            reset_lang(token)
+
     max_bytes = max_upload_mb * 1024 * 1024
     limiter = RateLimiter(per_minute=config.RATE_LIMIT_PER_MIN)
 
@@ -198,7 +218,7 @@ def create_app(
     def _require(request: Request, name: str):
         service = getattr(request.app.state, name, None)
         if service is None:
-            raise HTTPException(status_code=503, detail=MISSING_KEY_MSG)
+            raise HTTPException(status_code=503, detail=tr(MISSING_KEY_MSG_KEY))
         return service
 
     @app.get("/api/health")
@@ -214,15 +234,15 @@ def create_app(
         if not agent_id or agent_id == DEFAULT_AGENT_ID:
             kb = getattr(request.app.state, "kb", None)
             if kb is None:
-                raise HTTPException(status_code=503, detail=MISSING_KEY_MSG)
+                raise HTTPException(status_code=503, detail=tr(MISSING_KEY_MSG_KEY))
             return kb
         store = getattr(request.app.state, "store", None)
         if store is None:
-            raise HTTPException(status_code=503, detail=MISSING_KEY_MSG)
+            raise HTTPException(status_code=503, detail=tr(MISSING_KEY_MSG_KEY))
         try:
             return store.kb(agent_id)
         except KeyError:
-            raise HTTPException(status_code=404, detail=f"专家不存在：{agent_id}")
+            raise HTTPException(status_code=404, detail=tr("agent.not_found_id", agent_id=agent_id))
 
     def _agent_meta(request: Request, agent_id: str) -> dict:
         """取专家定义（persona / greeting 等）；default 无自定义时用内置定义。"""
@@ -238,9 +258,9 @@ def create_app(
         limiter.check("feedback:" + client_key(request))
         store = getattr(request.app.state, "store", None)
         if store is None:
-            raise HTTPException(status_code=503, detail=MISSING_KEY_MSG)
+            raise HTTPException(status_code=503, detail=tr(MISSING_KEY_MSG_KEY))
         if req.agent_id != DEFAULT_AGENT_ID and not store.get(req.agent_id):
-            raise HTTPException(status_code=404, detail="专家不存在")
+            raise HTTPException(status_code=404, detail=tr("agent.not_found"))
         entry = {
             "ts": datetime.now(timezone.utc).isoformat(),
             "agent_id": req.agent_id,
@@ -272,27 +292,27 @@ def create_app(
         旧文档走降级：每个片段单独成页，page_index 指向它在 pages 里的位置。
         """
         if not DOC_ID_RE.match(doc_id):
-            raise HTTPException(status_code=400, detail="文档 ID 格式不正确")
+            raise HTTPException(status_code=400, detail=tr("doc.id_invalid"))
         limiter.check("content:" + client_key(request))
 
         store = getattr(request.app.state, "store", None)
         if store is None:
-            raise HTTPException(status_code=503, detail=MISSING_KEY_MSG)
+            raise HTTPException(status_code=503, detail=tr(MISSING_KEY_MSG_KEY))
         try:
             kb = store.kb(agent_id) if agent_id and agent_id != DEFAULT_AGENT_ID else getattr(
                 request.app.state, "kb", None)
         except Exception:
             kb = getattr(request.app.state, "kb", None)
         if kb is None:
-            raise HTTPException(status_code=503, detail="知识库未就绪")
+            raise HTTPException(status_code=503, detail=tr("kb.not_ready"))
 
         entry = next((d for d in kb.list_documents() if d.get("doc_id") == doc_id), None)
         if entry is None:
-            raise HTTPException(status_code=404, detail="文档不存在")
+            raise HTTPException(status_code=404, detail=tr("doc.not_found"))
 
         chunks = kb.list_chunks_of(doc_id)
         if not chunks:
-            raise HTTPException(status_code=404, detail="文档没有可用的片段")
+            raise HTTPException(status_code=404, detail=tr("doc.no_chunks"))
 
         text_data = kb.get_document_text(doc_id)
         precise = bool(
@@ -367,17 +387,17 @@ def create_app(
         """按 chunk_id 返回出处片段原文（含前后相邻片段，供出处弹层展示）。"""
         store = getattr(request.app.state, "store", None)
         if store is None:
-            raise HTTPException(status_code=503, detail=MISSING_KEY_MSG)
+            raise HTTPException(status_code=503, detail=tr(MISSING_KEY_MSG_KEY))
         try:
             kb = store.kb(agent_id) if agent_id and agent_id != DEFAULT_AGENT_ID else getattr(
                 request.app.state, "kb", None)
         except Exception:
             kb = getattr(request.app.state, "kb", None)
         if kb is None:
-            raise HTTPException(status_code=503, detail="知识库未就绪")
+            raise HTTPException(status_code=503, detail=tr("kb.not_ready"))
         doc = kb.get_chunk(chunk_id)
         if doc is None:
-            raise HTTPException(status_code=404, detail="片段不存在")
+            raise HTTPException(status_code=404, detail=tr("doc.chunk_not_found"))
         meta = doc.metadata or {}
         result = {
             "chunk_id": chunk_id,
@@ -412,7 +432,7 @@ def create_app(
     def list_agents(request: Request):
         store = getattr(request.app.state, "store", None)
         if store is None:
-            raise HTTPException(status_code=503, detail=MISSING_KEY_MSG)
+            raise HTTPException(status_code=503, detail=tr(MISSING_KEY_MSG_KEY))
         # B4：给每个专家补文档数（KB 未就绪时置 0，不阻塞列表）
         agents = store.list_agents()
         for a in agents:
@@ -426,7 +446,7 @@ def create_app(
     @app.post("/api/agents")
     def create_agent(req: AgentCreateRequest, request: Request, _: None = Depends(require_admin)):
         if getattr(request.app.state, "store", None) is None:
-            raise HTTPException(status_code=503, detail=MISSING_KEY_MSG)
+            raise HTTPException(status_code=503, detail=tr(MISSING_KEY_MSG_KEY))
         try:
             entry = request.app.state.store.create(
                 name=req.name,
@@ -447,10 +467,10 @@ def create_app(
     def delete_agent(agent_id: str, request: Request, _: None = Depends(require_admin)):
         store = getattr(request.app.state, "store", None)
         if store is None:
-            raise HTTPException(status_code=503, detail=MISSING_KEY_MSG)
+            raise HTTPException(status_code=503, detail=tr(MISSING_KEY_MSG_KEY))
         removed = store.delete(agent_id)
         if removed is None:
-            raise HTTPException(status_code=404, detail=f"专家不存在或不可删除：{agent_id}")
+            raise HTTPException(status_code=404, detail=tr("agent.not_deletable", agent_id=agent_id))
         return {"status": "ok", **removed}
 
     @app.post("/api/upload")
@@ -465,7 +485,7 @@ def create_app(
         ext = os.path.splitext(display_name)[1].lower()
         if ext not in config.ALLOWED_EXTENSIONS:
             allowed = "、".join(sorted(config.ALLOWED_EXTENSIONS))
-            raise HTTPException(status_code=400, detail=f"不支持的文件类型，仅支持 {allowed}")
+            raise HTTPException(status_code=400, detail=tr("doc.file_type_unsupported", allowed=allowed))
 
         # 落盘文件名由服务端生成，彻底避免路径穿越与同名覆盖
         doc_id = uuid.uuid4().hex
@@ -478,11 +498,11 @@ def create_app(
                     size += len(block)
                     if size > max_bytes:
                         raise HTTPException(
-                            status_code=413, detail=f"文件超过 {max_upload_mb}MB 上限"
+                            status_code=413, detail=tr("doc.file_too_large", max_mb=max_upload_mb)
                         )
                     f.write(block)
             if size == 0:
-                raise HTTPException(status_code=400, detail="文件为空")
+                raise HTTPException(status_code=400, detail=tr("doc.file_empty"))
 
             chunks, pages = await run_in_threadpool(
                 load_and_split_with_pages, file_path, doc_id, display_name
@@ -498,7 +518,7 @@ def create_app(
             raise HTTPException(status_code=400, detail=str(e))
         except Exception as e:
             _remove_quietly(file_path)
-            raise HTTPException(status_code=500, detail=f"文档处理失败：{e}")
+            raise HTTPException(status_code=500, detail=tr("doc.process_failed", err=e))
 
         return {
             "status": "ok",
@@ -518,10 +538,10 @@ def create_app(
     ):
         kb = _agent_kb(request, agent_id)
         if not DOC_ID_RE.fullmatch(doc_id):
-            raise HTTPException(status_code=400, detail="doc_id 格式不合法")
+            raise HTTPException(status_code=400, detail=tr("doc.doc_id_invalid"))
         removed = kb.delete_document(doc_id)
         if removed is None:
-            raise HTTPException(status_code=404, detail="文档不存在")
+            raise HTTPException(status_code=404, detail=tr("doc.not_found"))
 
         # 上传目录里的文件按 doc_id + 扩展名存放，不依赖清单里的文件名
         ext = removed.get("ext") or ""
@@ -539,11 +559,11 @@ def create_app(
             qa = QAService(_agent_kb(request, req.agent_id), _require(request, "qa_llm"))
         question = req.question.strip()
         if not question:
-            raise HTTPException(status_code=422, detail="问题不能为空")
+            raise HTTPException(status_code=422, detail=tr("question.empty"))
         try:
             result = qa.ask(question)
         except Exception as e:
-            raise HTTPException(status_code=500, detail=f"问答失败：{e}")
+            raise HTTPException(status_code=500, detail=tr("qa.failed", err=e))
         return {"status": "ok", "question": question, **result}
 
     @app.post("/api/agent/stream")
@@ -556,7 +576,7 @@ def create_app(
         kb = _agent_kb(request, effective_agent_id)
         question = req.question.strip()
         if not question:
-            raise HTTPException(status_code=422, detail="问题不能为空")
+            raise HTTPException(status_code=422, detail=tr("question.empty"))
 
         # 专家配置：persona / model / 回答模式 / 日志目录
         persona = ""
@@ -580,7 +600,7 @@ def create_app(
         # B3: 专家配置了模型时用独立实例（带缓存），否则用默认实例
         llm_impl = _llm_for(model) if model else _require(request, "agent_llm")
         if llm_impl is None:
-            raise HTTPException(status_code=503, detail=MISSING_KEY_MSG)
+            raise HTTPException(status_code=503, detail=tr(MISSING_KEY_MSG_KEY))
 
         # run_agent 是同步生成器，交给 sse 层在后台线程里逐条取，避免阻塞事件循环
         events = run_agent(

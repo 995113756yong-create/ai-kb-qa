@@ -29,6 +29,7 @@ from app.config import (
     RRF_K,
 )
 from app.retrieval import BM25Index, fuse_scores, hybrid_search
+from app.i18n import tr
 
 MANIFEST_FILE = "docs.json"
 MANIFEST_VERSION = 2
@@ -268,7 +269,7 @@ class KnowledgeBase:
         期间所有检索和删除都会被阻塞，一份大 PDF 就足以卡住线上全部问答。
         """
         if not chunks:
-            raise ValueError("文档内容为空，无法建立索引")
+            raise ValueError(tr("doc.empty"))
 
         texts = [c.page_content for c in chunks]
         ids = [c.metadata["chunk_id"] for c in chunks]
@@ -277,7 +278,7 @@ class KnowledgeBase:
         # 锁外完成网络调用
         vectors = self.embeddings.embed_documents(texts)
         if len(vectors) != len(texts):
-            raise ValueError("向量数量与片段数量不一致，无法建立索引")
+            raise ValueError(tr("doc.vector_mismatch"))
 
         entry = {
             "doc_id": doc_id,

@@ -24,6 +24,7 @@ from typing import Any, Dict, List
 from app.document import KnowledgeBase, get_embeddings
 from app.agent.evidence import EvidenceRegistry
 from app.agent.tools import TOOL_SCHEMAS, execute_tool
+from app.i18n import tr
 
 SERVER_NAME = "kb-qa"
 SERVER_VERSION = "1.0.0"
@@ -88,7 +89,7 @@ class McpServer:
         arguments = params.get("arguments") or {}
 
         if not name:
-            raise ValueError("缺少 name 参数")
+            raise ValueError(tr("mcp.name_required"))
 
         result = execute_tool(name, json.dumps(arguments, ensure_ascii=False), self.kb, self.registry)
 

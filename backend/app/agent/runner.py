@@ -26,6 +26,7 @@ from app.agent.query_rewrite import decompose_question, should_attempt_decompose
 from app.agent.intent import CHAT, KB_QUERY, LIST_DOCS, classify
 from app.qa import EMPTY_KB_ANSWER, NOT_FOUND_ANSWER
 from app.agent.tools import TOOL_SCHEMAS, execute_tool, summarize, to_text
+from app.i18n import tr
 
 logger = logging.getLogger(__name__)
 
@@ -184,7 +185,7 @@ def _answer_without_evidence(
             yield {"type": "answer_delta", "text": delta}
     except Exception as e:
         logger.exception("无证据回答失败")
-        yield {"type": "error", "detail": f"大模型调用失败：{type(e).__name__}"}
+        yield {"type": "error", "detail": tr("runtime.llm_failed", err=type(e).__name__)}
         return
     answer = raw.strip() or "这个问题我暂时答不上来。"
     att = attribute(answer, [], question)
@@ -241,7 +242,7 @@ def _answer_chat(
             yield {"type": "answer_delta", "text": delta}
     except Exception as e:
         logger.exception("闲聊回复失败")
-        yield {"type": "error", "detail": f"大模型调用失败：{type(e).__name__}"}
+        yield {"type": "error", "detail": tr("runtime.llm_failed", err=type(e).__name__)}
         return
     answer = raw.strip() or "你好，有什么可以帮你？"
     used_ms = elapsed()
@@ -345,7 +346,7 @@ def _run_agent_impl(
     agent_id 只用于 final 事件回带与运行日志区分，空串即旧行为。
     """
     if answer_mode not in VALID_MODES:
-        raise ValueError(f"answer_mode 必须是 {VALID_MODES} 之一，收到 {answer_mode!r}")
+        raise ValueError(tr("runtime.answer_mode_invalid", modes=VALID_MODES, got=repr(answer_mode)))
 
     started = time.monotonic()
     registry = EvidenceRegistry()
@@ -603,7 +604,7 @@ def _run_agent_impl(
         logger.exception("Agent 运行失败")
         # 先写日志再 yield：yield 之后前端可能立刻断开，生成器就不再往下走了
         _write_run_log(log_dir, question, steps, registry, "", False, elapsed(), error=str(e), rewritten_question=rewritten)
-        yield {"type": "error", "detail": f"大模型调用失败：{type(e).__name__}"}
+        yield {"type": "error", "detail": tr("runtime.llm_failed", err=type(e).__name__)}
 
 
 

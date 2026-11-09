@@ -8,6 +8,7 @@ from app.document import KnowledgeBase
 from app.agent.evidence import EvidenceRegistry
 from app.agent.llm import AgentLLM
 from app.agent.rerank import rerank
+from app.i18n import tr
 
 MAX_RESULT_CHARS = 4000
 SNIPPET_CHARS = 600
@@ -93,9 +94,9 @@ def _parse_args(raw: str) -> Dict[str, Any]:
     try:
         parsed = json.loads(raw)
     except json.JSONDecodeError as e:
-        raise ValueError(f"参数不是合法 JSON（{e}）。请传一个 JSON 对象，例如 {{\"query\": \"关键词\"}}") from e
+        raise ValueError(tr("runtime.tool_args_invalid_json", err=e)) from e
     if not isinstance(parsed, dict):
-        raise ValueError("参数必须是 JSON 对象，例如 {\"query\": \"关键词\"}")
+        raise ValueError(tr("runtime.tool_args_not_object"))
     return parsed
 
 
