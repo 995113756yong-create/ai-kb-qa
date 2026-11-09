@@ -64,6 +64,7 @@ INTENT_ROUTING_ENABLED = os.getenv("INTENT_ROUTING_ENABLED", "true").lower() == 
 # default 专家不进来，沿用上面的 UPLOAD_DIR / FAISS_DIR / AGENT_LOG_DIR。
 AGENTS_DIR = os.getenv("AGENTS_DIR", os.path.join(BACKEND_DIR, "agents_store"))
 
+
 AGENT_LOG_DIR = os.getenv("AGENT_LOG_DIR", os.path.join(BACKEND_DIR, "logs"))
 
 # ============ 可信回答与评测体系（feat/trust-and-eval） ============

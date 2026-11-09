@@ -6,6 +6,7 @@ import { TrustSummary } from "@/components/workspace/TrustSummary";
 import { CitationFocusProvider } from "@/lib/citationFocus";
 import SourceCards from "@/components/SourceCards";
 import type { ChatMessage } from "@/lib/chat";
+import { useI18n } from "@/lib/i18n";
 
 type Props = {
   messages: ChatMessage[];
@@ -26,6 +27,7 @@ export default function MessageList({
   agentName,
   docCount,
 }: Props) {
+  const { t } = useI18n();
   if (messages.length === 0) {
     // 空状态撑满消息区，保证输入框稳定贴在底部
     const hasStarters = (starters?.length ?? 0) > 0 && onPickStarter;
@@ -35,18 +37,18 @@ export default function MessageList({
 
         <div className="space-y-1">
           <p className="text-sm font-medium">
-            {agentName ? `向「${agentName}」提问` : "开始一次对话"}
+            {agentName ? t("chat.emptyTitleWithAgent", { name: agentName }) : t("chat.emptyTitle")}
           </p>
           <p className="max-w-sm text-xs text-muted-foreground">
             {typeof docCount === "number" && docCount > 0
-              ? `已索引 ${docCount} 份文档。回答会标注知识库依据与数字溯源性，点引用编号可查看原文位置。`
-              : "先上传文档，再提问。回答会标注知识库依据与数字溯源性。"}
+              ? t("chat.emptyHintDocs", { n: docCount })
+              : t("chat.emptyHintNoDocs")}
           </p>
         </div>
 
         {hasStarters ? (
           <div className="flex w-full max-w-lg flex-col gap-2" data-testid="starter-questions">
-            <p className="text-[11px] text-muted-foreground">试试这样问</p>
+            <p className="text-[11px] text-muted-foreground">{t("chat.tryAsking")}</p>
             {starters!.slice(0, 4).map((q) => (
               <button
                 key={q}
@@ -107,7 +109,7 @@ export default function MessageList({
                   className="mb-2 flex items-center gap-1.5 rounded-lg bg-general-bg px-2.5 py-1.5 text-xs text-general"
                 >
                   <span aria-hidden>⚠️</span>
-                  该回答未引用文档内容，请谨慎参考
+                  {t("chat.ungrounded")}
                 </p>
               )
             )}
@@ -118,7 +120,7 @@ export default function MessageList({
                 data-testid="stopped-hint"
                 className="mb-2 rounded-lg bg-muted px-2.5 py-1.5 text-xs text-muted-foreground"
               >
-                已停止生成
+                {t("chat.stoppedByUser")}
               </p>
             )}
 
@@ -142,7 +144,7 @@ export default function MessageList({
               !message.stopped &&
               isThinking && (
                 <div className="flex items-center gap-1 py-1 text-xs text-muted-foreground">
-                  <span>思考中</span>
+                  <span>{t("chat.thinking")}</span>
                   <span className="flex gap-0.5">
                     <span className="thinking-dot h-1 w-1 rounded-full bg-muted-foreground" style={{ animationDelay: "0ms" }} />
                     <span className="thinking-dot h-1 w-1 rounded-full bg-muted-foreground" style={{ animationDelay: "150ms" }} />

@@ -7,6 +7,7 @@ import { useState } from "react";
 import { groupConversations, conversationTitle } from "@/lib/conversations";
 import { cn } from "@/lib/utils";
 import type { Conversation } from "@/lib/chat";
+import { useI18n } from "@/lib/i18n";
 
 export type ConversationListProps = {
   conversations: Conversation[];
@@ -27,6 +28,7 @@ export function ConversationList({
   onDelete,
   className,
 }: ConversationListProps) {
+  const { t } = useI18n();
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
   const groups = groupConversations(conversations);
@@ -58,11 +60,11 @@ export function ConversationList({
         onClick={onNew}
         className="flex items-center justify-center gap-1 rounded-lg border border-border bg-card px-3 py-2 text-sm text-foreground transition-colors hover:border-primary/50 hover:bg-primary/5"
       >
-        ＋ 新会话
+        {t("nav.newChat")}
       </button>
 
       {conversations.length === 0 && (
-        <p className="px-1 py-4 text-center text-xs text-muted-foreground">还没有会话</p>
+        <p className="px-1 py-4 text-center text-xs text-muted-foreground">{t("nav.noSessions")}</p>
       )}
 
       {groups.map((group) => (
@@ -105,7 +107,7 @@ export function ConversationList({
                 <span className="hidden shrink-0 gap-1 group-hover:flex">
                   <button
                     type="button"
-                    aria-label="重命名"
+                    aria-label={t("common.save")}
                     onClick={(e) => {
                       e.stopPropagation();
                       setRenamingId(c.id);
@@ -116,7 +118,7 @@ export function ConversationList({
                   </button>
                   <button
                     type="button"
-                    aria-label="删除"
+                    aria-label={t("common.delete")}
                     onClick={(e) => {
                       e.stopPropagation();
                       onDelete(c.id);

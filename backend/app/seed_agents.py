@@ -11,6 +11,7 @@ import logging
 import os
 from typing import List, Optional
 
+
 logger = logging.getLogger(__name__)
 
 FITNESS_AGENT_ID = "fitness-coach"

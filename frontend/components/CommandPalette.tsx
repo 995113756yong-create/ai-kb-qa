@@ -13,6 +13,7 @@ import {
   Sun,
 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
+import { useI18n } from "@/lib/i18n";
 
 type Props = {
   workspace?: boolean;
@@ -23,6 +24,7 @@ type Props = {
 };
 
 export default function CommandPalette({ workspace, onNewConversation, onNewAgent, onNavigate }: Props) {
+  const { t } = useI18n();
   const [open, setOpen] = useState(false);
   const { setTheme, resolvedTheme } = useTheme();
 
@@ -48,44 +50,44 @@ export default function CommandPalette({ workspace, onNewConversation, onNewAgen
   return (
     <>
       <CommandDialog open={open} onOpenChange={setOpen}>
-        <CommandGroup heading="命令">
+        <CommandGroup heading={t("palette.commands")}>
           {workspace ? (
             <>
               <CommandItem onSelect={() => { setOpen(false); onNewConversation?.(); }} data-testid="cmd-new-conversation">
-                <MessageSquarePlus /> 新会话
+                <MessageSquarePlus /> {t("palette.newChat")}
               </CommandItem>
               <CommandItem onSelect={() => { setOpen(false); onNewAgent?.(); }} data-testid="cmd-new-agent">
-                <CopyPlus /> 新建专家
+                <CopyPlus /> {t("palette.newExpert")}
               </CommandItem>
             </>
           ) : null}
         </CommandGroup>
         {onNavigate ? (
-          <CommandGroup heading="导航">
+          <CommandGroup heading={t("palette.navigation")}>
             <CommandItem onSelect={() => go("/")} data-testid="cmd-home">
-              <Home /> 首页
+              <Home /> {t("palette.home")}
             </CommandItem>
             <CommandItem onSelect={() => go("/chat")} data-testid="cmd-chat">
-              <MessageSquarePlus /> 工作台
+              <MessageSquarePlus /> {t("palette.workbench")}
             </CommandItem>
             <CommandItem onSelect={() => go("/eval")} data-testid="cmd-eval">
-              <BarChart3 /> 评测看板
+              <BarChart3 /> {t("palette.evalBoard")}
             </CommandItem>
           </CommandGroup>
         ) : null}
-        <CommandGroup heading="主题">
+        <CommandGroup heading={t("palette.themeGroup")}>
           <CommandItem onSelect={() => { setOpen(false); setTheme("light"); }} data-testid="cmd-theme-light">
-            <Sun /> 浅色模式
+            <Sun /> {t("palette.lightMode")}
           </CommandItem>
           <CommandItem onSelect={() => { setOpen(false); setTheme("dark"); }} data-testid="cmd-theme-dark">
-            <Moon /> 深色模式
+            <Moon /> {t("palette.darkMode")}
           </CommandItem>
           <CommandItem onSelect={() => { setOpen(false); setTheme(resolvedTheme === "dark" ? "light" : "dark"); }}>
-            <Sun /> 跟随系统相反切换
+            <Sun /> {t("palette.toggleOpposite")}
           </CommandItem>
         </CommandGroup>
         <CommandList>
-          <CommandEmpty>没有匹配的命令</CommandEmpty>
+          <CommandEmpty>{t("palette.noResults")}</CommandEmpty>
         </CommandList>
       </CommandDialog>
     </>

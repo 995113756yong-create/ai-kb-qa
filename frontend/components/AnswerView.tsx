@@ -6,6 +6,7 @@ import { useCitationFocus } from "@/lib/citationFocus";
 import { sourceByCitation } from "@/lib/citations";
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card";
 import type { Segment as TraceSegment, Source } from "@/lib/types";
+import { useI18n } from "@/lib/i18n";
 
 type Props = {
   text: string;
@@ -56,6 +57,7 @@ function CitationChip({
   source?: Source;
   onOpen: (e: MouseEvent<HTMLElement>) => void;
 }) {
+  const { t } = useI18n();
   const { activeN } = useCitationFocus();
   const isLinked = activeN === n;
 
@@ -69,7 +71,7 @@ function CitationChip({
         "mx-0.5 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-primary/10 px-1 text-[10px] font-semibold text-primary transition-colors hover:bg-primary/20 " +
         (isLinked ? "ring-2 ring-primary/40" : "")
       }
-      aria-label={`查看证据 ${n}${source?.source ? `：${source.source}` : ""}`}
+      aria-label={`${t("evidence.viewOriginal")} ${n}${source?.source ? `: ${source.source}` : ""}`}
     >
       {n}
     </button>
@@ -82,13 +84,13 @@ function CitationChip({
       <HoverCardTrigger asChild>{button}</HoverCardTrigger>
       <HoverCardContent className="w-80">
         <p className="text-[11px] text-muted-foreground">
-          {source.source ?? "未知文档"}
-          {source.page !== null && source.page !== undefined ? ` · 第 ${source.page} 页` : ""}
+          {source.source ?? t("common.unknownDoc")}
+          {source.page !== null && source.page !== undefined ? ` · ${t("common.page", { n: source.page })}` : ""}
         </p>
         <p className="mt-1 line-clamp-4 text-[13px] leading-[1.6]">
           {source.snippet.length > 120 ? `${source.snippet.slice(0, 120)}…` : source.snippet}
         </p>
-        <p className="mt-2 text-[11px] text-primary">点击查看原文 →</p>
+        <p className="mt-2 text-[11px] text-primary">{t("evidence.viewOriginal")}</p>
       </HoverCardContent>
     </HoverCard>
   );
@@ -105,6 +107,7 @@ function SegmentBody({
   messageId?: string;
   index?: number;
 }) {
+  const { t } = useI18n();
   // 每段内部仍复用引用渲染逻辑，编号照常可点击
   const hasWarning = segment.warnings.length > 0;
   const isGeneral = segment.kind === "general";
@@ -116,7 +119,7 @@ function SegmentBody({
   const title = hasWarning
     ? segment.warnings.join("\n")
     : isGeneral
-      ? "一般知识，非知识库内容"
+      ? t("trust.general")
       : undefined;
 
   const cites = (segment.citations ?? []).join(",");

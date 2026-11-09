@@ -19,6 +19,7 @@ import { cn } from "@/lib/utils";
 import { formatBytes } from "@/lib/numbers";
 import { timeAgo } from "@/lib/numbers";
 import type { DocInfo } from "@/lib/types";
+import { useI18n } from "@/lib/i18n";
 
 export type KnowledgePanelProps = {
   docs: DocInfo[];
@@ -46,6 +47,7 @@ export function KnowledgePanel({
   onDelete,
   className,
 }: KnowledgePanelProps) {
+  const { t } = useI18n();
   const [collapsed, setCollapsed] = useState(false);
   const [pendingDelete, setPendingDelete] = useState<DocInfo | null>(null);
 
@@ -57,7 +59,7 @@ export function KnowledgePanel({
         onClick={() => setCollapsed((v) => !v)}
         className="flex items-center justify-between px-1 text-sm font-medium text-foreground"
       >
-        <span>知识库 · {docs.length}</span>
+        <span>{t("nav.knowledge")} · {docs.length}</span>
         <span className="text-xs text-muted-foreground">{collapsed ? "▸" : "▾"}</span>
       </button>
 
@@ -79,12 +81,12 @@ export function KnowledgePanel({
                       {doc.filename}
                     </p>
                     <p className="text-[11px] text-muted-foreground">
-                      {doc.chunks ?? 0} 片 · {formatBytes(doc.size ?? 0)} · {timeAgo(new Date(doc.uploaded_at ?? 0).getTime())}
+                      {doc.chunks ?? 0} · {formatBytes(doc.size ?? 0)} · {timeAgo(new Date(doc.uploaded_at ?? 0).getTime(), (k, v) => t(k as never, v))}
                     </p>
                   </div>
                   <button
                     type="button"
-                    aria-label={`删除 ${doc.filename}`}
+                    aria-label={`${t("common.delete")} ${doc.filename}`}
                     onClick={() => setPendingDelete(doc)}
                     className="hidden shrink-0 rounded p-1 text-xs hover:bg-background group-hover:block"
                   >
@@ -95,7 +97,7 @@ export function KnowledgePanel({
             })}
             {docs.length === 0 && (
               <p className="px-2 py-3 text-center text-xs text-muted-foreground">
-                还没有文档，上传一份试试
+                {t("nav.upload")}
               </p>
             )}
           </div>
@@ -105,13 +107,13 @@ export function KnowledgePanel({
       <AlertDialog open={pendingDelete !== null}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>删除文档？</AlertDialogTitle>
+            <AlertDialogTitle>{t("nav.deleteDoc")}</AlertDialogTitle>
             <AlertDialogDescription>
-              确认删除「{pendingDelete?.filename}」？删除后基于该文档的回答将失去证据来源。
+              {t("nav.deleteDocConfirm", { name: pendingDelete?.filename ?? "" })}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel onClick={() => setPendingDelete(null)}>取消</AlertDialogCancel>
+            <AlertDialogCancel onClick={() => setPendingDelete(null)}>{t("common.cancel")}</AlertDialogCancel>
             <AlertDialogAction
               data-testid="confirm-delete-doc"
               onClick={() => {

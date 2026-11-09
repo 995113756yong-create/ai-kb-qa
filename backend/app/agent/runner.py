@@ -21,13 +21,79 @@ from app.agent.prompts import (
     STRICT_ANSWER_PROMPT,
     VALID_MODES,
     with_persona,
+    get_prompt,
 )
 from app.agent.query_rewrite import decompose_question, should_attempt_decompose
 from app.agent.intent import CHAT, KB_QUERY, LIST_DOCS, classify
 from app.qa import EMPTY_KB_ANSWER, NOT_FOUND_ANSWER
+from app.agent.multilingual import (
+    build_translate_prompt,
+    clean_translation,
+    detect_corpus_language,
+    detect_text_language,
+    should_translate_query,
+)
 from app.agent.tools import TOOL_SCHEMAS, execute_tool, summarize, to_text
+from app.i18n import get_lang, tr
 
 logger = logging.getLogger(__name__)
+
+
+# 语料语言缓存：同一个 KnowledgeBase 实例只检测一次
+_CORPUS_LANG_CACHE: dict = {}
+
+
+def _corpus_language(kb) -> Optional[str]:
+    """检测知识库的主要语言，结果按实例缓存。"""
+    if kb is None:
+        return None
+    key = id(kb)
+    if key in _CORPUS_LANG_CACHE:
+        return _CORPUS_LANG_CACHE[key]
+    lang = None
+    try:
+        texts = []
+        for doc in kb.list_documents():
+            doc_id = doc.get("doc_id")
+            if not doc_id:
+                continue
+            for chunk in kb.list_chunks_of(doc_id) or []:
+                texts.append(getattr(chunk, "page_content", "") or "")
+                if len(texts) >= 30:
+                    break
+            if len(texts) >= 30:
+                break
+        lang = detect_corpus_language(texts)
+    except Exception as e:
+        logger.warning("[cross-lingual] 语料语言检测失败: %s", e)
+    _CORPUS_LANG_CACHE[key] = lang
+    return lang
+
+
+def _translate_query(llm, question: str, target_lang: str) -> Optional[str]:
+    """把查询翻译成目标语言。失败返回 None（调用方回落到原问题）。"""
+    try:
+        prompt = build_translate_prompt(question, target_lang)
+        pieces = []
+        total = 0
+        for piece in llm.stream([{"role": "user", "content": prompt}]):
+            pieces.append(piece)
+            total += len(piece)
+            if total > 400:
+                break
+        cleaned = clean_translation("".join(pieces), question)
+        return cleaned if cleaned and cleaned != question else None
+    except Exception as e:
+        logger.warning("[cross-lingual] 查询翻译失败，沿用原问题: %s", e)
+        return None
+
+
+def _lang() -> str:
+    """回答语言：跟随当前请求语言（中间件按 Accept-Language 设置）。"""
+    try:
+        return get_lang() or "zh"
+    except Exception:
+        return "zh"
 
 LOG_FILE = "agent_runs.jsonl"
 MAX_CONSECUTIVE_ERRORS = 3
@@ -153,7 +219,7 @@ def safe_parse(raw_arguments: str) -> dict:
 
 def _answer_messages_no_evidence(question: str, mode: str = "reference", persona: str = "") -> List[dict]:
     """知识库无可用证据时的回答消息: reference 模式让模型用自己的知识回答并声明来源."""
-    prompt = with_persona(NO_EVIDENCE_ANSWER_PROMPT, persona)
+    prompt = with_persona(get_prompt("answer_no_evidence", _lang()), persona, _lang())
     return [
         {"role": "system", "content": prompt},
         {"role": "user", "content": question},
@@ -184,7 +250,7 @@ def _answer_without_evidence(
             yield {"type": "answer_delta", "text": delta}
     except Exception as e:
         logger.exception("无证据回答失败")
-        yield {"type": "error", "detail": f"大模型调用失败：{type(e).__name__}"}
+        yield {"type": "error", "detail": tr("runtime.llm_failed", err=type(e).__name__)}
         return
     answer = raw.strip() or "这个问题我暂时答不上来。"
     att = attribute(answer, [], question)
@@ -227,7 +293,7 @@ def _answer_chat(
     history 只作为对话上下文插入，让“谢谢你刚才的解释”这类话能自然接上；
     闲聊不检索、不引用，不影响证据边界。
     """
-    messages = [{"role": "system", "content": with_persona(CHAT_PROMPT, persona)}]
+    messages = [{"role": "system", "content": with_persona(get_prompt("chat", _lang()), persona, _lang())}]
     for turn in (history or [])[-config.CONTEXTUALIZE_MAX_TURNS * 2:]:
         role = turn.get("role")
         content = (turn.get("content") or "").strip()
@@ -241,7 +307,7 @@ def _answer_chat(
             yield {"type": "answer_delta", "text": delta}
     except Exception as e:
         logger.exception("闲聊回复失败")
-        yield {"type": "error", "detail": f"大模型调用失败：{type(e).__name__}"}
+        yield {"type": "error", "detail": tr("runtime.llm_failed", err=type(e).__name__)}
         return
     answer = raw.strip() or "你好，有什么可以帮你？"
     used_ms = elapsed()
@@ -295,9 +361,9 @@ def answer_messages(
     mode: str = "reference",
     persona: str = "",
 ) -> List[dict]:
-    base = STRICT_ANSWER_PROMPT if mode == "strict" else REFERENCE_ANSWER_PROMPT
+    base = get_prompt("answer_strict" if mode == "strict" else "answer_reference", _lang())
     return [
-        {"role": "system", "content": with_persona(base, persona)},
+        {"role": "system", "content": with_persona(base, persona, _lang())},
         {
             "role": "user",
             "content": f"证据：\n\n{registry.format_for_prompt()}\n\n问题：{question}",
@@ -345,7 +411,7 @@ def _run_agent_impl(
     agent_id 只用于 final 事件回带与运行日志区分，空串即旧行为。
     """
     if answer_mode not in VALID_MODES:
-        raise ValueError(f"answer_mode 必须是 {VALID_MODES} 之一，收到 {answer_mode!r}")
+        raise ValueError(tr("runtime.answer_mode_invalid", modes=VALID_MODES, got=repr(answer_mode)))
 
     started = time.monotonic()
     registry = EvidenceRegistry()
@@ -356,9 +422,9 @@ def _run_agent_impl(
         MeteredLLM(rerank_llm, meter) if (enable_rerank and rerank_llm) else None
     )
 
-    base_research = RESEARCH_PROMPT_STRICT if answer_mode == "strict" else RESEARCH_PROMPT_REFERENCE
+    base_research = get_prompt("research_strict" if answer_mode == "strict" else "research_reference", _lang())
     messages = [
-        {"role": "system", "content": with_persona(base_research, persona)},
+        {"role": "system", "content": with_persona(base_research, persona, _lang())},
         {"role": "user", "content": question},
     ]
     seen_calls: set = set()
@@ -396,6 +462,23 @@ def _run_agent_impl(
             if enable_intent:
                 intent = classify(question)
 
+    # 跨语言检索：提问语言与语料语言不一致时，把查询翻译成语料语言。
+    # 只翻译查询、不翻译语料 —— 语料零迁移成本，检索走原生语言，准确率不受影响。
+    search_question = question
+    if search_question and not kb.is_empty:
+        q_lang = detect_text_language(search_question)
+        corpus_lang = _corpus_language(kb)
+        if should_translate_query(q_lang, corpus_lang):
+            translated = _translate_query(llm, search_question, corpus_lang)
+            if translated and translated != search_question:
+                yield {
+                    "type": "translate",
+                    "original": search_question,
+                    "translated": translated,
+                    "target": corpus_lang,
+                }
+                search_question = translated
+
     if enable_intent and intent is not None:
         yield {"type": "intent", "intent": intent.intent, "reason": intent.reason}
         if intent.intent == LIST_DOCS:
@@ -424,16 +507,16 @@ def _run_agent_impl(
     try:
         if intent is not None and intent.intent == KB_QUERY:
             call_id = "intent-1"
-            call_args = json.dumps({"query": question}, ensure_ascii=False)
+            call_args = json.dumps({"query": search_question}, ensure_ascii=False)
             yield {"type": "tool_call", "step": 0, "id": call_id, "name": "search_kb",
-                   "args": {"query": question}}
+                   "args": {"query": search_question}}
             result = execute_tool("search_kb", call_args, kb, registry,
                                   search_k=search_k, rerank_llm=effective_rerank_llm)
             ok = "error" not in result
             summary = summarize(result)
             yield {"type": "tool_result", "step": 0, "id": call_id, "name": "search_kb",
                    "ok": ok, "summary": summary}
-            steps.append({"step": 0, "tool": "search_kb", "args": {"query": question},
+            steps.append({"step": 0, "tool": "search_kb", "args": {"query": search_question},
                           "ok": ok, "summary": summary})
             # 预检索结果交给模型作参考：模型能看到已查过什么，原样再查会被去重短路
             seen_calls.add(f"search_kb:{canonical_json(call_args)}")
@@ -603,7 +686,7 @@ def _run_agent_impl(
         logger.exception("Agent 运行失败")
         # 先写日志再 yield：yield 之后前端可能立刻断开，生成器就不再往下走了
         _write_run_log(log_dir, question, steps, registry, "", False, elapsed(), error=str(e), rewritten_question=rewritten)
-        yield {"type": "error", "detail": f"大模型调用失败：{type(e).__name__}"}
+        yield {"type": "error", "detail": tr("runtime.llm_failed", err=type(e).__name__)}
 
 
 

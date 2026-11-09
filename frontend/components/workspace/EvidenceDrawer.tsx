@@ -8,6 +8,7 @@ import { X } from "lucide-react";
 
 import { EvidenceReader, type EvidenceReaderProps } from "@/components/workspace/EvidenceReader";
 import { cn } from "@/lib/utils";
+import { useI18n } from "@/lib/i18n";
 
 export type EvidenceDrawerProps = Omit<EvidenceReaderProps, "className"> & {
   open: boolean;
@@ -15,6 +16,7 @@ export type EvidenceDrawerProps = Omit<EvidenceReaderProps, "className"> & {
 };
 
 export function EvidenceDrawer({ open, onOpenChange, ...readerProps }: EvidenceDrawerProps) {
+  const { t } = useI18n();
   return (
     <DialogPrimitive.Root open={open} onOpenChange={onOpenChange}>
       <DialogPrimitive.Portal>
@@ -34,7 +36,7 @@ export function EvidenceDrawer({ open, onOpenChange, ...readerProps }: EvidenceD
             "data-[state=closed]:slide-out-to-bottom data-[state=open]:slide-in-from-bottom",
           )}
         >
-          <DialogPrimitive.Title className="sr-only">证据原文</DialogPrimitive.Title>
+          <DialogPrimitive.Title className="sr-only">{t("evidence.title")}</DialogPrimitive.Title>
 
           {/* 抓手 */}
           <div className="flex shrink-0 items-center justify-center py-2">
@@ -42,7 +44,7 @@ export function EvidenceDrawer({ open, onOpenChange, ...readerProps }: EvidenceD
           </div>
 
           <DialogPrimitive.Close
-            aria-label="关闭证据抽屉"
+            aria-label={t("evidence.closeDrawer")}
             className="absolute right-2 top-2 rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
           >
             <X className="h-4 w-4" />

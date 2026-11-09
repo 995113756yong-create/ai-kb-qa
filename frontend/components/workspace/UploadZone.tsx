@@ -5,6 +5,7 @@
 import { useRef, useState } from "react";
 
 import { cn } from "@/lib/utils";
+import { useI18n } from "@/lib/i18n";
 
 export type UploadZoneProps = {
   /** 上传模式：upload 直接调 API；local 仅选文件回调（向导里创建专家后再上传） */
@@ -30,6 +31,7 @@ export function UploadZone({
   compact = false,
   className,
 }: UploadZoneProps) {
+  const { t } = useI18n();
   const inputRef = useRef<HTMLInputElement>(null);
   const [dragging, setDragging] = useState(false);
 
@@ -80,8 +82,8 @@ export function UploadZone({
         )}
       >
         <span className="text-lg">{!isLocal && uploading ? "⏳" : "📄"}</span>
-        <span>{!isLocal && uploading ? "上传中…" : "点击或拖拽上传文档"}</span>
-        {!compact && <span className="text-xs text-muted-foreground/70">支持 PDF / Markdown / TXT</span>}
+        <span>{!isLocal && uploading ? t("nav.uploading") : t("nav.upload")}</span>
+        {!compact && <span className="text-xs text-muted-foreground/70">{t("nav.uploadHint")}</span>}
         <input
           ref={inputRef}
           type="file"
@@ -101,7 +103,7 @@ export function UploadZone({
               <span className="truncate">{f.name}</span>
               <button
                 type="button"
-                aria-label={`移除 ${f.name}`}
+                aria-label={`${t("common.delete")} ${f.name}`}
                 className="ml-2 shrink-0 rounded p-0.5 text-muted-foreground hover:text-destructive"
                 onClick={(e) => {
                   e.stopPropagation();

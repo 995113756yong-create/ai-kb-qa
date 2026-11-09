@@ -8,6 +8,7 @@ import { useMemo } from "react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import type { ChatMessage } from "@/lib/chat";
 import { cn } from "@/lib/utils";
+import { useI18n } from "@/lib/i18n";
 
 export type TrustSummaryProps = {
   message: ChatMessage & { role: "assistant" };
@@ -55,6 +56,7 @@ export function countSegments(message: ChatMessage & { role: "assistant" }): Cou
 }
 
 export function TrustSummary({ message, onFocusSegment, className }: TrustSummaryProps) {
+  const { t } = useI18n();
   const counts = useMemo(() => countSegments(message), [message]);
   const ratio = message.groundedRatio;
 
@@ -67,9 +69,9 @@ export function TrustSummary({ message, onFocusSegment, className }: TrustSummar
   const dash = (pct / 100) * c;
 
   const rows = [
-    { key: "kb", label: "知识库依据", n: counts.kb, idx: counts.firstKb, tone: "text-kb" },
-    { key: "general", label: "一般知识", n: counts.general, idx: counts.firstGeneral, tone: "text-general" },
-    { key: "warn", label: "数字待核对", n: counts.warn, idx: counts.firstWarn, tone: "text-warn" },
+    { key: "kb", label: t("trust.kb"), n: counts.kb, idx: counts.firstKb, tone: "text-kb" },
+    { key: "general", label: t("trust.general"), n: counts.general, idx: counts.firstGeneral, tone: "text-general" },
+    { key: "warn", label: t("trust.warn"), n: counts.warn, idx: counts.firstWarn, tone: "text-warn" },
   ];
 
   return (
@@ -82,7 +84,7 @@ export function TrustSummary({ message, onFocusSegment, className }: TrustSummar
             "inline-flex items-center gap-1 rounded-full border border-border/60 px-1.5 py-0.5 text-[10px] text-muted-foreground transition-colors hover:bg-muted",
             className,
           )}
-          aria-label={`知识库依据 ${pct}%`}
+          aria-label={t("trust.ringLabel", { pct })}
         >
           <svg width="20" height="20" viewBox="0 0 24 24" aria-hidden>
             <circle cx="12" cy="12" r={r} fill="none" stroke="var(--muted)" strokeWidth="3" />
@@ -112,7 +114,7 @@ export function TrustSummary({ message, onFocusSegment, className }: TrustSummar
                 className="flex w-full items-center justify-between rounded px-1.5 py-1 text-xs hover:bg-muted disabled:opacity-50"
               >
                 <span className={row.tone}>{row.label}</span>
-                <span className="tabular-nums">{row.n} 句</span>
+                <span className="tabular-nums">{t("trust.sentences", { n: row.n })}</span>
               </button>
             </li>
           ))}

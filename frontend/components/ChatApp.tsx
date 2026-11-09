@@ -11,6 +11,9 @@ import CommandPalette from "@/components/CommandPalette";
 import MessageList from "@/components/MessageList";
 import AppSidebar from "@/components/workspace/AppSidebar";
 import { AdminTokenDialog } from "@/components/workspace/AdminTokenDialog";
+import LanguageToggle from "@/components/LanguageToggle";
+import ThemeToggle from "@/components/ThemeToggle";
+import { useI18n } from "@/lib/i18n";
 import { EvidenceDrawer } from "@/components/workspace/EvidenceDrawer";
 import { EvidenceReader } from "@/components/workspace/EvidenceReader";
 import { toast } from "sonner";
@@ -30,6 +33,8 @@ type Props = {
 };
 
 export default function ChatApp({ initialAgentId, initialConversationId }: Props) {
+  const { t } = useI18n();
+
   // ---------- 基础状态 ----------
   const [activeAgentId, setActiveAgentId] = useState(initialAgentId);
   const [agents, setAgents] = useState<AgentInfo[]>([]);
@@ -57,7 +62,7 @@ export default function ChatApp({ initialAgentId, initialConversationId }: Props
         setAgents(res.agents);
       } catch {
         if (cancelled) return;
-        toast.error("加载专家列表失败");
+        toast.error(t("errors.agentsLoadFailed"));
       } finally {
         if (!cancelled) setAgentsLoading(false);
       }
@@ -65,7 +70,7 @@ export default function ChatApp({ initialAgentId, initialConversationId }: Props
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [t]);
 
   // ---------- 会话管理 ----------
   const {
@@ -107,29 +112,29 @@ export default function ChatApp({ initialAgentId, initialConversationId }: Props
       const res = await listAgents();
       setAgents(res.agents);
     } catch {
-      toast.error("加载专家列表失败");
+      toast.error(t("errors.agentsLoadFailed"));
     }
-  }, []);
+  }, [t]);
 
   const handleCreateAgent = useCallback(
     async (payload: AgentCreateRequest) => {
       try {
         await createAgent(payload);
-        toast.success(`专家「${payload.name}」创建成功`);
+        toast.success(t("experts.created"));
         await refreshAgents();
         await refreshDocs();
       } catch (e) {
-        toast.error(e instanceof Error ? e.message : "创建专家失败");
+        toast.error(e instanceof Error ? e.message : t("experts.createFailed"));
       }
     },
-    [refreshAgents, refreshDocs],
+    [refreshAgents, refreshDocs, t],
   );
 
   const handleDeleteAgent = useCallback(
     async (agentId: string) => {
       try {
         await deleteAgent(agentId);
-        toast.success("专家已删除");
+        toast.success(t("experts.deleted"));
         if (agentId === activeAgentId) {
           setActiveAgentId("default");
           syncAddress("default", null);
@@ -137,10 +142,10 @@ export default function ChatApp({ initialAgentId, initialConversationId }: Props
         await refreshAgents();
         await refreshDocs();
       } catch (e) {
-        toast.error(e instanceof Error ? e.message : "删除专家失败");
+        toast.error(e instanceof Error ? e.message : t("experts.deleteFailed"));
       }
     },
-    [activeAgentId, refreshAgents, refreshDocs, syncAddress],
+    [activeAgentId, refreshAgents, refreshDocs, syncAddress, t],
   );
 
   useEffect(() => {
@@ -215,7 +220,7 @@ export default function ChatApp({ initialAgentId, initialConversationId }: Props
                 role: "assistant",
                 mode: "fast",
                 steps: [],
-                answer: `获取回答失败：${detail}`,
+                answer: t("errors.answerFailed", { detail }),
                 sources: null,
                 segments: null,
                 groundedRatio: null,
@@ -263,6 +268,7 @@ export default function ChatApp({ initialAgentId, initialConversationId }: Props
       run,
       running,
       updateLast,
+      t,
     ],
   );
 
@@ -369,7 +375,7 @@ export default function ChatApp({ initialAgentId, initialConversationId }: Props
         <header className="flex h-14 shrink-0 items-center gap-2 border-b border-border/60 px-4">
           <button
             type="button"
-            aria-label="折叠侧栏"
+            aria-label={t("nav.settings")}
             className="rounded-md p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground"
             onClick={() => setSidebarOpen((v) => !v)}
           >
@@ -377,14 +383,14 @@ export default function ChatApp({ initialAgentId, initialConversationId }: Props
           </button>
           <div className="min-w-0">
             <p className="truncate text-sm font-medium leading-tight">
-              {activeAgent?.name ?? "知识库问答"}
+              {activeAgent?.name ?? t("nav.knowledge")}
             </p>
             {activeAgent?.description && (
               <p className="truncate text-xs text-muted-foreground">{activeAgent.description}</p>
             )}
           </div>
           <div className="ml-auto flex items-center gap-2">
-            <div className="flex rounded-lg border border-border/60 p-0.5" role="group" aria-label="交互模式">
+            <div className="flex rounded-lg border border-border/60 p-0.5" role="group" aria-label={t("chat.modeAgent")}>
               <button
                 type="button"
                 aria-pressed={mode === "agent"}
@@ -399,12 +405,14 @@ export default function ChatApp({ initialAgentId, initialConversationId }: Props
                 className={`rounded-md px-2.5 py-1 text-xs font-medium transition-colors ${mode === "fast" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}
                 onClick={() => setMode("fast")}
               >
-                快速
+                {t("chat.modeFast")}
               </button>
             </div>
+            <LanguageToggle />
+            <ThemeToggle />
             <button
               type="button"
-              aria-label="新建会话"
+              aria-label={t("nav.newChat")}
               className="rounded-md p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground"
               onClick={newChat}
             >
@@ -426,13 +434,13 @@ export default function ChatApp({ initialAgentId, initialConversationId }: Props
             />
             {mode === "fast" && messages.length > 0 ? (
               <div className="flex items-center justify-center gap-1.5 border-t border-border/60 bg-muted/30 px-4 py-1.5 text-[11px] text-muted-foreground">
-                快速模式不理解上下文，追问请切换到 Agent 模式
+                {t("chat.fastNoContext")}
                 <button
                   type="button"
                   onClick={() => setMode("agent")}
                   className="font-medium text-primary underline underline-offset-2"
                 >
-                  切换
+                  {t("chat.switch")}
                 </button>
               </div>
             ) : null}

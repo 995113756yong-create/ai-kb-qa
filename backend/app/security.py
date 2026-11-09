@@ -14,6 +14,7 @@ from typing import Deque, Dict
 from fastapi import HTTPException, Request
 
 from app import config
+from app.i18n import tr
 
 
 def require_admin(request: Request) -> None:
@@ -25,7 +26,7 @@ def require_admin(request: Request) -> None:
 
     supplied = request.headers.get("x-admin-token", "")
     if not hmac.compare_digest(supplied.encode(), token.encode()):
-        raise HTTPException(status_code=401, detail="需要管理员口令")
+        raise HTTPException(status_code=401, detail=tr("auth.admin_required"))
 
 
 def client_key(request: Request) -> str:
@@ -89,7 +90,7 @@ class RateLimiter:
                     # 活跃 key 太多，大概率是攻击：拒绝新 key，宁可误拒也不放行
                     raise HTTPException(
                         status_code=429,
-                        detail="请求过于频繁，请稍后再试",
+                        detail=tr("rate.limited"),
                     )
             bucket = self._hits.setdefault(key, deque())
             while bucket and now - bucket[0] > self.window:
@@ -97,6 +98,6 @@ class RateLimiter:
             if len(bucket) >= self.per_minute:
                 raise HTTPException(
                     status_code=429,
-                    detail="请求过于频繁，请稍后再试",
+                    detail=tr("rate.limited"),
                 )
             bucket.append(now)

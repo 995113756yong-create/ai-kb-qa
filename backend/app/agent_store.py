@@ -18,6 +18,7 @@ from datetime import datetime, timezone
 from typing import Dict, List, Optional
 
 from app.document import KnowledgeBase
+from app.i18n import tr
 from langchain_core.embeddings import Embeddings
 
 logger = logging.getLogger(__name__)
@@ -160,28 +161,28 @@ class AgentStore:
     ) -> dict:
         name = (name or "").strip()
         if not name:
-            raise ValueError("专家名称不能为空")
+            raise ValueError(tr("agent.name_required"))
         if len(name) > MAX_NAME_LEN:
-            raise ValueError(f"专家名称不能超过 {MAX_NAME_LEN} 字")
+            raise ValueError(tr("agent.name_too_long", max_len=MAX_NAME_LEN))
         model = (model or "").strip()
         if model and not MODEL_RE.fullmatch(model):
-            raise ValueError("模型名不合法")
+            raise ValueError(tr("agent.model_invalid"))
         answer_mode = (answer_mode or "reference").strip()
         if answer_mode not in VALID_ANSWER_MODES:
-            raise ValueError(f"answer_mode 必须是 {VALID_ANSWER_MODES} 之一")
+            raise ValueError(tr("agent.answer_mode_invalid", modes=VALID_ANSWER_MODES))
         starters = [str(q).strip() for q in (starter_questions or []) if str(q).strip()]
         if len(starters) > 4:
-            raise ValueError("starter_questions 最多 4 条")
+            raise ValueError(tr("agent.starters_too_many"))
 
         if agent_id is None:
             agent_id = uuid.uuid4().hex[:8]
         agent_id = agent_id.strip().lower()
         if not AGENT_ID_RE.fullmatch(agent_id):
-            raise ValueError("agent_id 只能包含小写字母、数字和连字符，最长 32 位")
+            raise ValueError(tr("agent.id_invalid"))
         if agent_id == DEFAULT_AGENT_ID:
-            raise ValueError("default 是保留 ID，不能用于新建专家")
+            raise ValueError(tr("agent.id_reserved"))
         if self.get(agent_id) is not None:
-            raise ValueError(f"agent_id 已存在：{agent_id}")
+            raise ValueError(tr("agent.id_exists", agent_id=agent_id))
 
         entry = {
             "agent_id": agent_id,
@@ -205,7 +206,7 @@ class AgentStore:
             # 锁内再查一次：上面那次检查在锁外，两个请求同时用同一个 ID 创建时
             # 都能通过，后写入的会覆盖前一个。
             if agent_id in self._agents:
-                raise ValueError(f"agent_id 已存在：{agent_id}")
+                raise ValueError(tr("agent.id_exists", agent_id=agent_id))
             self._agents[agent_id] = entry
             self._save()
         return dict(entry)
@@ -240,7 +241,7 @@ class AgentStore:
     def kb(self, agent_id: str) -> KnowledgeBase:
         """每个专家一个 KnowledgeBase，构造后缓存复用。"""
         if self.get(agent_id) is None:
-            raise KeyError(f"专家不存在：{agent_id}")
+            raise KeyError(tr("agent.not_found_id", agent_id=agent_id))
         with self._lock:
             kb = self._kbs.get(agent_id)
         if kb is not None:

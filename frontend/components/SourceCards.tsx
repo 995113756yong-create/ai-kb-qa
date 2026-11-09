@@ -3,12 +3,14 @@
 import { useState } from "react";
 
 import type { Source } from "@/lib/types";
+import { useI18n } from "@/lib/i18n";
 
 type Props = {
   sources: Source[];
 };
 
 export default function SourceCards({ sources }: Props) {
+  const { t } = useI18n();
   const [open, setOpen] = useState(true);
 
   if (sources.length === 0) {
@@ -24,7 +26,7 @@ export default function SourceCards({ sources }: Props) {
         className="inline-flex items-center gap-1 text-xs font-medium text-indigo-600 transition-colors hover:text-indigo-700 dark:text-indigo-400 dark:hover:text-indigo-300"
       >
         <span aria-hidden>📎</span>
-        出处（{sources.length}）{open ? "收起" : "展开"}
+        {t("chat.sources")}（{sources.length}）{open ? t("trace.collapse") : t("trace.expand")}
       </button>
 
       {open && (
@@ -40,8 +42,8 @@ export default function SourceCards({ sources }: Props) {
                 <span className="inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-indigo-100 px-1 text-[10px] font-semibold text-indigo-700 dark:bg-indigo-500/20 dark:text-indigo-300">
                   {source.index}
                 </span>
-                [{source.index}] {source.source ?? "未知文档"}
-                {source.page ? ` · 第${source.page}页` : ""}
+                [{source.index}] {source.source ?? t("common.unknownDoc")}
+                {source.page ? ` · ${t("common.page", { n: source.page })}` : ""}
               </p>
               <p className="mt-1 whitespace-pre-wrap text-zinc-500 dark:text-zinc-400">
                 {source.snippet}

@@ -1,3 +1,5 @@
+"use client";
+
 import Link from "next/link";
 
 import {
@@ -9,6 +11,7 @@ import {
 } from "@/lib/evalSummary";
 import type { EvalSummary } from "@/lib/evalTypes";
 import summaryJson from "@/data/eval-summary.json";
+import { useI18n } from "@/lib/i18n";
 
 // 评测看板：静态读取构建期的 eval-summary.json，无需运行时接口。
 // 用于回答「当前检索质量如何、哪类问题最弱、哪些用例没过」。
@@ -34,6 +37,7 @@ function StatCard({
 }
 
 export default function EvalPage() {
+  const { t, locale } = useI18n();
   const strict = modeStat(summary, "strict");
   const rows = modeRows(summary);
   const cats = categoryRates(summary, "strict");
@@ -45,7 +49,7 @@ export default function EvalPage() {
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">{summary.title}</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            生成于 {summary.generated_at} · commit{" "}
+            {t("eval.generatedAt", { time: summary.generated_at })} · commit{" "}
             <span className="font-mono text-xs">{summary.commit}</span>
           </p>
         </div>
@@ -54,31 +58,31 @@ export default function EvalPage() {
             href="/"
             className="rounded-lg border border-border/60 px-3 py-1.5 transition-colors hover:bg-muted"
           >
-            返回对话
+            {t("eval.backToChat")}
           </Link>
           <Link
             href="/experts"
             className="rounded-lg border border-border/60 px-3 py-1.5 transition-colors hover:bg-muted"
           >
-            专家画廊
+            {t("experts.galleryTitle")}
           </Link>
         </nav>
       </header>
 
       <section className="mt-8 grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <StatCard label="严格模式通过率" value={pct(strict.pass_rate)} hint={`${strict.total} 个用例`} />
-        <StatCard label="检索命中率" value={pct(strict.retrieval_rate)} />
-        <StatCard label="引用率" value={pct(strict.citation_rate)} />
-        <StatCard label="P95 延迟" value={`${strict.latency_p95} ms`} hint={`P50 ${strict.latency_p50} ms`} />
+        <StatCard label={t("eval.strictPassRate")} value={pct(strict.pass_rate)} hint={t("eval.cases", { n: strict.total })} />
+        <StatCard label={t("eval.retrievalRate")} value={pct(strict.retrieval_rate)} />
+        <StatCard label={t("eval.citationRate")} value={pct(strict.citation_rate)} />
+        <StatCard label={t("eval.p95Latency")} value={`${strict.latency_p95} ms`} hint={`P50 ${strict.latency_p50} ms`} />
       </section>
 
       <section className="mt-10">
-        <h2 className="text-sm font-medium">两种回答模式对比</h2>
+        <h2 className="text-sm font-medium">{t("eval.modeCompare")}</h2>
         <div className="mt-3 overflow-hidden rounded-xl border border-border/60">
           <table className="w-full text-sm">
             <thead className="bg-muted/40 text-xs text-muted-foreground">
               <tr>
-                <th className="px-4 py-2 text-left font-medium">指标</th>
+                <th className="px-4 py-2 text-left font-medium">{t("eval.metric")}</th>
                 <th className="px-4 py-2 text-right font-medium">strict</th>
                 <th className="px-4 py-2 text-right font-medium">reference</th>
               </tr>
@@ -97,7 +101,7 @@ export default function EvalPage() {
       </section>
 
       <section className="mt-10">
-        <h2 className="text-sm font-medium">分类通过率（由弱到强）</h2>
+        <h2 className="text-sm font-medium">{t("eval.categoryPass")}</h2>
         <ul className="mt-3 space-y-2">
           {cats.map((c) => (
             <li key={c.category} className="flex items-center gap-3">
@@ -117,13 +121,13 @@ export default function EvalPage() {
             </li>
           ))}
           {cats.length === 0 ? (
-            <li className="text-sm text-muted-foreground">暂无分类数据</li>
+            <li className="text-sm text-muted-foreground">{t("eval.noCategoryData")}</li>
           ) : null}
         </ul>
       </section>
 
       <section className="mt-10">
-        <h2 className="text-sm font-medium">未通过用例（strict，{failed.length} 条）</h2>
+        <h2 className="text-sm font-medium">{t("eval.failedCases", { n: failed.length })}</h2>
         {failed.length === 0 ? (
           <p className="mt-3 text-sm text-muted-foreground">全部通过。</p>
         ) : (
@@ -133,11 +137,11 @@ export default function EvalPage() {
                 <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
                   <span className="font-mono">{c.id}</span>
                   <span className="rounded bg-muted px-1.5 py-0.5">{c.category}</span>
-                  <span>{c.grounded ? "已溯源" : "未溯源"}</span>
+                  <span>{c.grounded ? t("eval.groundedLabel") : t("eval.ungroundedLabel")}</span>
                 </div>
                 <p className="mt-2 text-sm font-medium">{c.question}</p>
                 <p className="mt-1 text-xs text-muted-foreground">
-                  问题：{c.problems.join("；")}
+                  {t("eval.problems", { list: c.problems.join(locale === "zh" ? "；" : "; ") })}
                 </p>
                 <p className="mt-2 line-clamp-3 text-xs text-muted-foreground">{c.answer}</p>
               </li>

@@ -5,8 +5,10 @@ import { Laptop, Moon, Sun } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { Button } from "@/components/ui/button";
+import { useI18n } from "@/lib/i18n";
 
 export default function ThemeToggle() {
+  const { t } = useI18n();
   const { theme, setTheme, resolvedTheme } = useTheme();
   // 水合前不能读 theme（服务端拿不到），必须先渲染一个占位再切到真实图标。
   // 这是 next-themes 官方文档推荐的标准写法，属于规则误报。
@@ -29,7 +31,7 @@ export default function ThemeToggle() {
     <Button
       variant="ghost"
       size="icon"
-      aria-label="切换主题"
+      aria-label={t("theme.toggle")}
       onClick={() => setTheme(next)}
       suppressHydrationWarning
     >
